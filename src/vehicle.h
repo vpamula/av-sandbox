@@ -26,4 +26,8 @@ private:
 
     float steeringAngle;
 
+    float vehicleLength;
+
+    float vehicleWidth;
+
 };
