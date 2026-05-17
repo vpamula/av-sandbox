@@ -8,7 +8,7 @@ class Vehicle
 
 public:
 
-    Vehicle(float startX, float startY);
+    Vehicle(float startX, float startY, float length, float width);
 
     void Update(float dt);
 

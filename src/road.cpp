@@ -25,3 +25,15 @@ void Road::Draw() {
     }
 
 }
+
+float Road::getRightLaneCenter() {
+
+    return center_y + width / 4;
+
+}
+
+float Road::getLeftLaneCenter() {
+
+    return center_y - width / 4;
+
+}

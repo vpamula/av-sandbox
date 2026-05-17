@@ -2,13 +2,12 @@
 
 #include <cmath>
 
-Vehicle::Vehicle(float startX, float startY)
-{   
-    
-    vehicleLength = 80.0f;
-    vehicleWidth = 40.0f;
+Vehicle::Vehicle(float startX, float startY, float length, float width) {
     x = startX;
     y = startY;
+    vehicleLength = length;
+    vehicleWidth = width;
+
     heading = 0.0f;
     speed = 0.0f;
     steeringAngle = 0.0f;
