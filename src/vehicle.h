@@ -14,6 +14,14 @@ public:
 
     void Draw();
 
+    float getX() {
+        return x;
+    }
+    
+    float getY() {
+        return y;
+    }
+
 private:
 
     float x;

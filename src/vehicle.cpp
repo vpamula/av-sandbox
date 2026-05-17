@@ -3,8 +3,8 @@
 #include <cmath>
 
 Vehicle::Vehicle(float startX, float startY)
-
 {   
+    
     vehicleLength = 80.0f;
     vehicleWidth = 40.0f;
     x = startX;
@@ -14,8 +14,9 @@ Vehicle::Vehicle(float startX, float startY)
     steeringAngle = 0.0f;
 }
 
-void Vehicle::Update(float dt)
 
+
+void Vehicle::Update(float dt)
 {
     // Throttle
     if (IsKeyDown(KEY_W)) {
@@ -57,9 +58,8 @@ void Vehicle::Update(float dt)
 }
 
 void Vehicle::Draw()
-
 {
-    Rectangle rect = { x , y , vehicleLength, vehicleWidth};
+    Rectangle rect = {x, y, vehicleLength, vehicleWidth};
     Vector2 origin = { vehicleLength / 2, vehicleWidth / 2 };
     float frontOffset = vehicleLength / 2.5;
     float x_front = x + frontOffset * cos(heading);
@@ -68,11 +68,11 @@ void Vehicle::Draw()
         rect,
         origin,
         heading * RAD2DEG,
-        RED
+        MAROON
     );
     DrawCircleV(
         (Vector2){ x_front, y_front },
         8,
-        YELLOW
+        WHITE
     );
 }
