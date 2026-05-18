@@ -1,9 +1,35 @@
 #include "raylib.h"
 #include "vehicle.h"
 #include "road.h"
+#include "path.h"
 #include <iostream>
 #include <algorithm>
 
+int findForwardWaypoints(const std::vector<Vector2>& waypoints, Vehicle& vehicle) {
+    for (int i = 0; i < waypoints.size(); i++) {
+        if (waypoints[i].x > vehicle.getX()) {
+            return std::min(i + 3, (int)waypoints.size() - 1);
+        }
+    }
+    return waypoints.size() - 1;
+}
+
+void followLane(Vehicle& vehicle, const std::vector<Vector2>& waypoints, int& currentWaypointIndex) {
+    int lookaheadIndex = std::min(currentWaypointIndex + 5, (int)waypoints.size() - 1);
+    Vector2 target = waypoints[lookaheadIndex];
+    float dx = target.x - vehicle.getX();
+    float dy = target.y - vehicle.getY();
+    float desired_heading = atan2(dy, dx);
+    float headingError = desired_heading - vehicle.getHeading();
+    float steeringGain = 5.0f;
+    float steeringCommand = headingError * steeringGain;
+    steeringCommand = std::clamp(steeringCommand, -0.4f, 0.4f);
+    vehicle.setSteeringAngle(steeringCommand);
+    float distance = sqrt(dx*dx + dy*dy);
+    if (distance < 80.0f and currentWaypointIndex < waypoints.size() - 1) {
+        currentWaypointIndex++;
+    }
+}
 int main()
 
 {
@@ -31,9 +57,13 @@ int main()
         vehicleLength, // vehicle_length
         vehicleWidth // vehicle_width
     );
-
+    
+    Path path;
     std::vector<Vector2> waypoints = road.generateLaneWaypoints(true);
-    int currentWaypointIndex = waypoints.size() / 2;
+    for (Vector2 wp : waypoints) {
+        path.addWaypoint(wp);
+    }
+    int currentWaypointIndex = path.getWaypoints().size() / 2;
  
     Camera2D camera = { 0 };
     camera.offset = (Vector2) {screenWidth / 2, screenHeight / 2};
@@ -45,45 +75,18 @@ int main()
     while (!WindowShouldClose())
     {
         float dt = GetFrameTime();
-
-        int lookaheadIndex = std::min(currentWaypointIndex + 5, (int)waypoints.size() - 1);
-        Vector2 target = waypoints[lookaheadIndex];
-        float dx = target.x - vehicle.getX();
-        float dy = target.y - vehicle.getY();
-        float desired_heading = atan2(dy, dx);
-        float headingError = desired_heading - vehicle.getHeading();
-        float steeringCommand = headingError * 0.5f;
-        // steeringCommand = std::clamp(steeringCommand, -0.4f, 0.4f);
         if (autonomousMode) {
-            vehicle.setSteeringAngle(steeringCommand);
-        }
-        float distance = sqrt(dx*dx + dy*dy);
-        if (distance < 80.0f and currentWaypointIndex < waypoints.size() - 1) {
-            currentWaypointIndex++;
-        }
+            followLane(vehicle, path.getWaypoints(), currentWaypointIndex);
+            }
 
         if (IsKeyPressed(KEY_TAB)) {
             autonomousMode = !autonomousMode;
             if (autonomousMode) {
-                float minDistance = 1e9;
-
-                for (int i = 0; i < waypoints.size(); i++) {
-                    float dx = waypoints[i].x - vehicle.getX();
-                    if (dx < 0) {
-                        continue;
-                    }
-
-                    float dy = waypoints[i].y - vehicle.getY();
-
-                    float dist = sqrt(dx*dx + dy*dy);
-
-                    if (dist < minDistance) {
-                        minDistance = dist;
-                        currentWaypointIndex = i;
-                        }
-                    }
-                }
+                currentWaypointIndex = findForwardWaypoints(path.getWaypoints(), vehicle);
             }
+        }
+        float targetSpeed = 200.0f;
+        vehicle.setSpeed(targetSpeed);
             
         vehicle.Update(dt);
         camera.target = (Vector2) {vehicle.getX(), vehicle.getY()};
@@ -91,12 +94,15 @@ int main()
         ClearBackground(DARKGREEN);
             BeginMode2D(camera);
                 road.Draw();
-                for (Vector2 wp : waypoints) {
-                    DrawCircleV(wp, 6, BLUE);
-                }
+                path.Draw();
                 vehicle.Draw();
             EndMode2D();
             DrawText("AV Sandbox", 20, 20, 30, WHITE);
+            if (autonomousMode) {
+                DrawText("AUTO", 20, 60, 30, GREEN);
+            } else {
+                DrawText("MANUAL", 20, 60, 30, RED);
+            }
         EndDrawing();
     }
 

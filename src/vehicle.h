@@ -30,6 +30,10 @@ public:
         steeringAngle = angle;
     }
 
+    void setSpeed(float sp) {
+        speed = sp;
+    }
+
 private:
 
     float x;

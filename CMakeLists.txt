@@ -16,6 +16,8 @@ add_executable(av-sandbox
 
     src/road.cpp
 
+    src/path.cpp
+
 )
 
 target_link_libraries(av-sandbox raylib)
