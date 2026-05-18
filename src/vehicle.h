@@ -22,6 +22,14 @@ public:
         return y;
     }
 
+    float getHeading() {
+        return heading;
+    }
+
+    void setSteeringAngle(float angle) {
+        steeringAngle = angle;
+    }
+
 private:
 
     float x;

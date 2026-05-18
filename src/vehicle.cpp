@@ -47,6 +47,7 @@ void Vehicle::Update(float dt)
         steeringAngle = -0.87f;
 
     // Friction
+    speed = 200.0f;
     speed *= 0.99f;
 
     // Vehicle motion

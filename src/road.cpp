@@ -37,3 +37,22 @@ float Road::getLeftLaneCenter() {
     return center_y - width / 4;
 
 }
+
+std::vector<Vector2> Road::generateLaneWaypoints(bool rightLane) {
+    std::vector<Vector2> laneWaypoints;
+    float laneCenterY;
+
+    if (rightLane) {
+        laneCenterY = center_y + width / 4;
+    } else {
+        laneCenterY = center_y - width / 4;
+    }
+
+    float waypointSpacing = 100.0f;
+    for (float i = center_x - length / 2; i < center_x + length / 2; i += waypointSpacing) {
+        laneWaypoints.push_back((Vector2){ i, laneCenterY });
+    }
+
+    return laneWaypoints;
+
+}

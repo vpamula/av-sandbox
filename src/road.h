@@ -1,6 +1,7 @@
 #pragma once
 
 #include "raylib.h"
+#include <vector>
 
 class Road {
     public: 
@@ -8,6 +9,7 @@ class Road {
         void Draw();
         float getRightLaneCenter();
         float getLeftLaneCenter();
+        std::vector<Vector2> generateLaneWaypoints(bool rightLane);
 
     private:
         float center_x;
@@ -15,6 +17,5 @@ class Road {
         float heading;
         float width;
         float length;
-
 
 };
