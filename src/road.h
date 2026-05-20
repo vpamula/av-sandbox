@@ -1,14 +1,15 @@
 #pragma once
 
 #include "raylib.h"
+#include "lane.h"
 #include <vector>
 
 class Road {
     public: 
         Road(float center_x, float center_y, float heading, float width, float length);
         void Draw();
-        float getRightLaneCenter();
-        float getLeftLaneCenter();
+        Lane& getRightLane();
+        Lane& getLeftLane();
         float getWidth() {
             return width;
         }
@@ -20,5 +21,7 @@ class Road {
         float heading;
         float width;
         float length;
+        Lane rightLane;
+        Lane leftLane;
 
 };

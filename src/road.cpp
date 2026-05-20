@@ -1,7 +1,9 @@
 #include "road.h"
 #include <cmath>
 
-Road::Road(float center_x, float center_y, float heading, float width, float length) {
+Road::Road(float center_x, float center_y, float heading, float width, float length) 
+: rightLane(center_x + cos(heading + PI/2) * width / 4, center_y + sin(heading + PI/2) * width / 4, heading, width / 2, length),
+leftLane(center_x, center_y - width / 4, heading + PI, width / 2, length) {
     this->center_x = center_x;
     this->center_y = center_y;
     this->heading = heading;
@@ -30,14 +32,6 @@ void Road::Draw() {
 
 }
 
-float Road::getRightLaneCenter() {
-    return center_y + width / 4;
-}
-
-float Road::getLeftLaneCenter() {
-    return center_y - width / 4;
-}
-
 std::vector<Vector2> Road::generateLaneWaypoints(bool rightLane) {
     std::vector<Vector2> laneWaypoints;
     float dirX = cos(heading);
@@ -63,4 +57,12 @@ std::vector<Vector2> Road::generateLaneWaypoints(bool rightLane) {
 
     return laneWaypoints;
 
+}
+
+Lane& Road::getRightLane() {
+    return rightLane;
+}
+
+Lane& Road::getLeftLane() {
+    return leftLane;
 }

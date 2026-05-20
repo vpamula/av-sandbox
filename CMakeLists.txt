@@ -20,6 +20,11 @@ add_executable(av-sandbox
 
     src/lanefollower.cpp
 
+    src/trajectorygenerator.cpp
+
+    src/lane.cpp
+    
+
 )
 
 target_link_libraries(av-sandbox raylib)

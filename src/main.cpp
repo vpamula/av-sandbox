@@ -3,17 +3,9 @@
 #include "road.h"
 #include "path.h"
 #include "lanefollower.h"
+#include "trajectorygenerator.h"
 #include <iostream>
 #include <algorithm>
-
-int findForwardWaypoints(const std::vector<Vector2>& waypoints, Vehicle& vehicle) {
-    for (int i = 0; i < waypoints.size(); i++) {
-        if (waypoints[i].x > vehicle.getX()) {
-            return std::min(i + 3, (int)waypoints.size() - 1);
-        }
-    }
-    return waypoints.size() - 1;
-}
 
 int main()
 
@@ -46,35 +38,34 @@ int main()
 
     Vehicle vehicle(
         0.0f, // vehicle_center_x
-        road.getRightLaneCenter(), // vehicle_center_y
+        road.getRightLane().getCenterY(), // vehicle_center_y
         vehicleLength, // vehicle_length
         vehicleWidth // vehicle_width
     );
     
     Path path;
-    std::vector<Vector2> horizontalWaypoints = road.generateLaneWaypoints(true);
-    std::vector<Vector2> verticalWaypoints = verticalRoad.generateLaneWaypoints(true);
+    Lane& horizontalLane = road.getRightLane();
+    Lane& verticalLane = verticalRoad.getRightLane();
+    Vector2 horizontalEnd = horizontalLane.getEndPoint();
+    Vector2 verticalStart = verticalLane.getStartPoint();
+
+    Vector2 horizontalTrim = {horizontalEnd.x - 100, horizontalEnd.y};
+    Vector2 verticalTrim = {verticalStart.x, verticalStart.y + 200};
+
+
+    std::vector<Vector2> horizontalWaypoints = horizontalLane.generateWaypointsBetween(horizontalLane.getStartPoint(), horizontalTrim);
+    std::vector<Vector2> verticalWaypoints = verticalLane.generateWaypointsBetween(verticalTrim, verticalLane.getEndPoint());
+    std::vector<Vector2> turnWaypoints = TrajectoryGenerator::generateConnector(horizontalTrim, horizontalLane.getDirection(), verticalTrim, verticalLane.getDirection(), 20.0f, 5);
 
     for (Vector2 wp : horizontalWaypoints) {
         path.addWaypoint(wp);
-    }
-
-    std::vector<Vector2> turnWaypoints;
-    for (float theta = PI/2; theta >= 0; theta -= 0.32) {
-        Vector2 horizontalEnd = horizontalWaypoints.back();
-        float laneX = verticalWaypoints[2].x;
-        float laneY = horizontalEnd.y;
-        float cx = horizontalEnd.x;
-        float cy = horizontalEnd.y + road.getWidth() / 4;
-        float r = abs(verticalWaypoints[2].y - horizontalEnd.y);
-        turnWaypoints.push_back((Vector2) {cx + r * cos(theta), cy - r * sin(theta)});
     }
 
     for (int i = 0; i < turnWaypoints.size(); i++) {
         path.addWaypoint(turnWaypoints[i]);
     }
 
-    for (int i = 2; i < verticalWaypoints.size(); i++) {
+    for (int i = 0; i < verticalWaypoints.size(); i++) {
         path.addWaypoint(verticalWaypoints[i]);
     }
 
