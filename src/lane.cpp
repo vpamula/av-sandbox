@@ -41,17 +41,3 @@ Lane::generateWaypointsBetween(Vector2 startPoint, Vector2 endPoint) {
     }
     return waypoints;
 }
-
-void Lane::Draw() {
-    float dashLength = 80.0f;
-    float dashGap = 60.0f;
-    float dashWidth = 8.0f;
-    Vector2 direction = {cos(heading), sin(heading)};
-
-    for (float s = -length / 2; s < length / 2; s += dashLength + dashGap) {
-        Vector2 center = {center_x + direction.x * s, center_y + direction.y * s};
-        Rectangle dash = {center.x, center.y, dashLength, dashWidth};
-        Vector2 origin = {dashLength / 2, dashWidth / 2};
-        DrawRectanglePro(dash, origin, heading * RAD2DEG, YELLOW);
-    }
-}

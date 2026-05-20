@@ -7,7 +7,6 @@ class Lane {
         Lane(float center_x, float center_y, float heading, float width, float length);
         std::vector<Vector2> generateWaypoints();
         Vector2 getDirection();
-        void Draw();
         float getCenterX() {
             return center_x;
         }

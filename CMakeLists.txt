@@ -23,7 +23,8 @@ add_executable(av-sandbox
     src/trajectorygenerator.cpp
 
     src/lane.cpp
-    
+
+    src/pathbuilder.cpp
 
 )
 

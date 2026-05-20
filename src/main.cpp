@@ -4,6 +4,7 @@
 #include "path.h"
 #include "lanefollower.h"
 #include "trajectorygenerator.h"
+#include "pathbuilder.h"
 #include <iostream>
 #include <algorithm>
 
@@ -43,31 +44,10 @@ int main()
         vehicleWidth // vehicle_width
     );
     
-    Path path;
     Lane& horizontalLane = road.getRightLane();
     Lane& verticalLane = verticalRoad.getRightLane();
-    Vector2 horizontalEnd = horizontalLane.getEndPoint();
-    Vector2 verticalStart = verticalLane.getStartPoint();
-
-    Vector2 horizontalTrim = {horizontalEnd.x - 100, horizontalEnd.y};
-    Vector2 verticalTrim = {verticalStart.x, verticalStart.y + 200};
-
-
-    std::vector<Vector2> horizontalWaypoints = horizontalLane.generateWaypointsBetween(horizontalLane.getStartPoint(), horizontalTrim);
-    std::vector<Vector2> verticalWaypoints = verticalLane.generateWaypointsBetween(verticalTrim, verticalLane.getEndPoint());
-    std::vector<Vector2> turnWaypoints = TrajectoryGenerator::generateConnector(horizontalTrim, horizontalLane.getDirection(), verticalTrim, verticalLane.getDirection(), 20.0f, 5);
-
-    for (Vector2 wp : horizontalWaypoints) {
-        path.addWaypoint(wp);
-    }
-
-    for (int i = 0; i < turnWaypoints.size(); i++) {
-        path.addWaypoint(turnWaypoints[i]);
-    }
-
-    for (int i = 0; i < verticalWaypoints.size(); i++) {
-        path.addWaypoint(verticalWaypoints[i]);
-    }
+    ConnectionData connection = PathBuilder::connectLanes(horizontalLane, verticalLane);
+    Path path = connection.path;
 
     LaneFollower controller;
     controller.reacquireWaypoint(vehicle, path.getWaypoints());
@@ -102,6 +82,8 @@ int main()
             BeginMode2D(camera);
                 road.Draw();
                 verticalRoad.Draw();
+                road.DrawCenterLineBetween(horizontalLane.getStartPoint(), connection.entryTrim);
+                verticalRoad.DrawCenterLineBetween(connection.exitTrim, verticalLane.getEndPoint());
                 path.Draw();
                 vehicle.Draw();
             EndMode2D();

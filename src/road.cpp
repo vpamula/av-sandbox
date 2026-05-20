@@ -16,20 +16,26 @@ void Road::Draw() {
     Vector2 origin = {length / 2, width / 2};
     DrawRectanglePro(rect, origin, heading * RAD2DEG, DARKGRAY);
 
+}
+
+void Road::DrawCenterLineBetween(Vector2 startPoint, Vector2 endPoint) {
     float dashLength = 80.0f;
     float dashGap = 60.0f;
     float dashWidth = 8.0f;
 
-    float dirX = cos(heading);
-    float dirY = sin(heading);
-    for (float s = -length / 2; s < length / 2; s += dashLength + dashGap) {
-        float x = center_x + s * dirX;
-        float y = center_y + s * dirY;
-        Rectangle dash = {x, y, dashLength, dashWidth};
-        Vector2 dashOrigin = {dashLength / 2, dashWidth / 2};
-        DrawRectanglePro(dash, dashOrigin, heading * RAD2DEG, YELLOW);
-    }
+    Vector2 direction = {cos(heading), sin(heading)};
+    Vector2 roadStart = {center_x - direction.x * length/2, center_y - direction.y * length/2};
 
+    float startProjection = (startPoint.x - roadStart.x) * direction.x + (startPoint.y - roadStart.y) * direction.y;
+    float endProjection = (endPoint.x - roadStart.x) * direction.x + (endPoint.y - roadStart.y) * direction.y;
+
+    for (float s = startProjection; s <= endProjection; s += dashLength + dashGap) {
+        Vector2 center = {roadStart.x + direction.x * s, roadStart.y + direction.y * s};
+        Rectangle dash = {center.x, center.y, dashLength, dashWidth};
+        Vector2 origin = {dashLength / 2, dashWidth / 2};
+        DrawRectanglePro(dash, origin, heading * RAD2DEG, YELLOW);
+
+    }
 }
 
 std::vector<Vector2> Road::generateLaneWaypoints(bool rightLane) {

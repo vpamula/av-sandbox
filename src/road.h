@@ -8,6 +8,7 @@ class Road {
     public: 
         Road(float center_x, float center_y, float heading, float width, float length);
         void Draw();
+        void DrawCenterLineBetween(Vector2 startPoint, Vector2 endPoint);
         Lane& getRightLane();
         Lane& getLeftLane();
         float getWidth() {
