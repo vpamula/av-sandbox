@@ -2,6 +2,7 @@
 #include "vehicle.h"
 #include "road.h"
 #include "path.h"
+#include "lanefollower.h"
 #include <iostream>
 #include <algorithm>
 
@@ -14,22 +15,6 @@ int findForwardWaypoints(const std::vector<Vector2>& waypoints, Vehicle& vehicle
     return waypoints.size() - 1;
 }
 
-void followLane(Vehicle& vehicle, const std::vector<Vector2>& waypoints, int& currentWaypointIndex) {
-    int lookaheadIndex = std::min(currentWaypointIndex + 5, (int)waypoints.size() - 1);
-    Vector2 target = waypoints[lookaheadIndex];
-    float dx = target.x - vehicle.getX();
-    float dy = target.y - vehicle.getY();
-    float desired_heading = atan2(dy, dx);
-    float headingError = desired_heading - vehicle.getHeading();
-    float steeringGain = 5.0f;
-    float steeringCommand = headingError * steeringGain;
-    steeringCommand = std::clamp(steeringCommand, -0.4f, 0.4f);
-    vehicle.setSteeringAngle(steeringCommand);
-    float distance = sqrt(dx*dx + dy*dy);
-    if (distance < 80.0f and currentWaypointIndex < waypoints.size() - 1) {
-        currentWaypointIndex++;
-    }
-}
 int main()
 
 {
@@ -48,7 +33,15 @@ int main()
         0.0f,     // center_y
         0.0f,     // heading
         roadWidth,    // width
-        10000.0f  // length
+        2000.0f  // length
+    );
+
+    Road verticalRoad(
+        1000.0f,  // center_x
+        2400.0f,  // center_y
+        PI / 2,   // heading
+        roadWidth, // width
+        5000.0f   // length 
     );
 
     Vehicle vehicle(
@@ -59,34 +52,57 @@ int main()
     );
     
     Path path;
-    std::vector<Vector2> waypoints = road.generateLaneWaypoints(true);
-    for (Vector2 wp : waypoints) {
+    std::vector<Vector2> horizontalWaypoints = road.generateLaneWaypoints(true);
+    std::vector<Vector2> verticalWaypoints = verticalRoad.generateLaneWaypoints(true);
+
+    for (Vector2 wp : horizontalWaypoints) {
         path.addWaypoint(wp);
     }
-    int currentWaypointIndex = path.getWaypoints().size() / 2;
+
+    std::vector<Vector2> turnWaypoints;
+    for (float theta = PI/2; theta >= 0; theta -= 0.32) {
+        Vector2 horizontalEnd = horizontalWaypoints.back();
+        float laneX = verticalWaypoints[2].x;
+        float laneY = horizontalEnd.y;
+        float cx = horizontalEnd.x;
+        float cy = horizontalEnd.y + road.getWidth() / 4;
+        float r = abs(verticalWaypoints[2].y - horizontalEnd.y);
+        turnWaypoints.push_back((Vector2) {cx + r * cos(theta), cy - r * sin(theta)});
+    }
+
+    for (int i = 0; i < turnWaypoints.size(); i++) {
+        path.addWaypoint(turnWaypoints[i]);
+    }
+
+    for (int i = 2; i < verticalWaypoints.size(); i++) {
+        path.addWaypoint(verticalWaypoints[i]);
+    }
+
+    LaneFollower controller;
+    controller.reacquireWaypoint(vehicle, path.getWaypoints());
  
     Camera2D camera = { 0 };
     camera.offset = (Vector2) {screenWidth / 2, screenHeight / 2};
     camera.zoom = 1.0f;
 
     bool autonomousMode = true;
-
-
     while (!WindowShouldClose())
     {
         float dt = GetFrameTime();
         if (autonomousMode) {
-            followLane(vehicle, path.getWaypoints(), currentWaypointIndex);
-            }
+            controller.Update(vehicle, path.getWaypoints(), dt); 
+        }
+        else {
+            float targetSpeed = 200.0f;
+            vehicle.setSpeed(targetSpeed);
+        }
 
         if (IsKeyPressed(KEY_TAB)) {
             autonomousMode = !autonomousMode;
             if (autonomousMode) {
-                currentWaypointIndex = findForwardWaypoints(path.getWaypoints(), vehicle);
+                controller.reacquireWaypoint(vehicle, path.getWaypoints());
             }
         }
-        float targetSpeed = 200.0f;
-        vehicle.setSpeed(targetSpeed);
             
         vehicle.Update(dt);
         camera.target = (Vector2) {vehicle.getX(), vehicle.getY()};
@@ -94,6 +110,7 @@ int main()
         ClearBackground(DARKGREEN);
             BeginMode2D(camera);
                 road.Draw();
+                verticalRoad.Draw();
                 path.Draw();
                 vehicle.Draw();
             EndMode2D();
@@ -103,6 +120,9 @@ int main()
             } else {
                 DrawText("MANUAL", 20, 60, 30, RED);
             }
+            DrawText(TextFormat("Speed: %.1f", vehicle.getSpeed()), 20, 100, 30, WHITE);
+            DrawText(TextFormat("Heading Angle: %.2f", vehicle.getHeading() * RAD2DEG), 20, 140, 30, WHITE);
+            // DrawText(TextFormat("Steering Angle: %.2f", vehicle.getSteeringAngle()), 20, 180, 30, WHITE);
         EndDrawing();
     }
 

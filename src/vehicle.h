@@ -30,8 +30,20 @@ public:
         steeringAngle = angle;
     }
 
+    float getSteeringAngle() {
+        return steeringAngle;
+    }
+
     void setSpeed(float sp) {
         speed = sp;
+    }
+
+    float getSpeed() {
+        return speed;
+    }
+
+    void setTargetSpeed(float ts) {
+        targetSpeed = ts;
     }
 
 private:
@@ -49,5 +61,7 @@ private:
     float vehicleLength;
 
     float vehicleWidth;
+
+    float targetSpeed;
 
 };

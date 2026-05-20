@@ -18,8 +18,12 @@ void Road::Draw() {
     float dashGap = 60.0f;
     float dashWidth = 8.0f;
 
-    for (float i = center_x - length / 2; i < center_x + length / 2;i += dashLength + dashGap) {
-        Rectangle dash = {i, center_y, dashLength, dashWidth};
+    float dirX = cos(heading);
+    float dirY = sin(heading);
+    for (float s = -length / 2; s < length / 2; s += dashLength + dashGap) {
+        float x = center_x + s * dirX;
+        float y = center_y + s * dirY;
+        Rectangle dash = {x, y, dashLength, dashWidth};
         Vector2 dashOrigin = {dashLength / 2, dashWidth / 2};
         DrawRectanglePro(dash, dashOrigin, heading * RAD2DEG, YELLOW);
     }
@@ -27,30 +31,34 @@ void Road::Draw() {
 }
 
 float Road::getRightLaneCenter() {
-
     return center_y + width / 4;
-
 }
 
 float Road::getLeftLaneCenter() {
-
     return center_y - width / 4;
-
 }
 
 std::vector<Vector2> Road::generateLaneWaypoints(bool rightLane) {
     std::vector<Vector2> laneWaypoints;
-    float laneCenterY;
+    float dirX = cos(heading);
+    float dirY = sin(heading);
+    float perpX = -sin(heading);
+    float perpY = cos(heading);
+
+    float laneOffset;
 
     if (rightLane) {
-        laneCenterY = center_y + width / 4;
+        laneOffset = width / 4;
     } else {
-        laneCenterY = center_y - width / 4;
+        laneOffset = -width / 4;
     }
 
     float waypointSpacing = 100.0f;
-    for (float i = center_x - length / 2; i < center_x + length / 2; i += waypointSpacing) {
-        laneWaypoints.push_back((Vector2){ i, laneCenterY });
+
+    for (float s = -length / 2; s < length / 2; s += waypointSpacing) {
+        float x = center_x + s * dirX + laneOffset * perpX;
+        float y = center_y + s * dirY + laneOffset * perpY;
+        laneWaypoints.push_back((Vector2){x, y});
     }
 
     return laneWaypoints;

@@ -9,7 +9,7 @@ Vehicle::Vehicle(float startX, float startY, float length, float width) {
     vehicleWidth = width;
 
     heading = 0.0f;
-    speed = 0.0f;
+    speed = 200.0f;
     steeringAngle = 0.0f;
 }
 

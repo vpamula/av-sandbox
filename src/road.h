@@ -9,6 +9,9 @@ class Road {
         void Draw();
         float getRightLaneCenter();
         float getLeftLaneCenter();
+        float getWidth() {
+            return width;
+        }
         std::vector<Vector2> generateLaneWaypoints(bool rightLane);
 
     private:
