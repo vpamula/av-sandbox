@@ -26,6 +26,10 @@ add_executable(av-sandbox
 
     src/pathbuilder.cpp
 
+    src/world.cpp
+
+    src/intersection.cpp
+
 )
 
 target_link_libraries(av-sandbox raylib)

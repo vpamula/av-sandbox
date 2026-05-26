@@ -11,30 +11,75 @@ leftLane(center_x, center_y - width / 4, heading + PI, width / 2, length) {
     this->length = length;
 }
 
-void Road::Draw() {
-    Rectangle rect = {center_x, center_y, length, width};
-    Vector2 origin = {length / 2, width / 2};
-    DrawRectanglePro(rect, origin, heading * RAD2DEG, DARKGRAY);
+void Road::Draw(const std::vector<Intersection>& intersections) {
+    Rectangle rect = {
+        center_x,
+        center_y,
+        length,
+        width
+    };
 
-}
+    Vector2 origin = {
+        length / 2,
+        width / 2
+    };
 
-void Road::DrawCenterLineBetween(Vector2 startPoint, Vector2 endPoint) {
+    DrawRectanglePro(
+        rect,
+        origin,
+        heading * RAD2DEG,
+        DARKGRAY
+    );
+
     float dashLength = 80.0f;
     float dashGap = 60.0f;
     float dashWidth = 8.0f;
 
-    Vector2 direction = {cos(heading), sin(heading)};
-    Vector2 roadStart = {center_x - direction.x * length/2, center_y - direction.y * length/2};
+    Vector2 direction = {
+        cos(heading),
+        sin(heading)
+    };
 
-    float startProjection = (startPoint.x - roadStart.x) * direction.x + (startPoint.y - roadStart.y) * direction.y;
-    float endProjection = (endPoint.x - roadStart.x) * direction.x + (endPoint.y - roadStart.y) * direction.y;
+    Vector2 roadStart = {
+        center_x -
+        direction.x * length/2,
 
-    for (float s = startProjection; s <= endProjection; s += dashLength + dashGap) {
+        center_y -
+        direction.y * length/2
+    };
+
+    for (float s = dashLength / 2; s < length - dashLength / 2; s += dashLength + dashGap) {
         Vector2 center = {roadStart.x + direction.x * s, roadStart.y + direction.y * s};
-        Rectangle dash = {center.x, center.y, dashLength, dashWidth};
-        Vector2 origin = {dashLength / 2, dashWidth / 2};
-        DrawRectanglePro(dash, origin, heading * RAD2DEG, YELLOW);
 
+        Rectangle dash = {
+            center.x,
+            center.y,
+            dashLength,
+            dashWidth
+        };
+
+        Vector2 dashOrigin = {
+            dashLength / 2,
+            dashWidth / 2
+        };
+    
+        bool insideIntersection = false;
+
+        for (const Intersection& intersection : intersections) {
+            if (CheckCollisionPointRec(center, intersection.getBounds())) {
+                insideIntersection = true;
+                break;
+            }
+        }
+
+        if (!insideIntersection) {
+            DrawRectanglePro(
+                dash,
+                dashOrigin,
+                heading * RAD2DEG,
+                YELLOW
+            );
+        }
     }
 }
 
@@ -44,7 +89,6 @@ std::vector<Vector2> Road::generateLaneWaypoints(bool rightLane) {
     float dirY = sin(heading);
     float perpX = -sin(heading);
     float perpY = cos(heading);
-
     float laneOffset;
 
     if (rightLane) {
@@ -52,17 +96,13 @@ std::vector<Vector2> Road::generateLaneWaypoints(bool rightLane) {
     } else {
         laneOffset = -width / 4;
     }
-
     float waypointSpacing = 100.0f;
-
     for (float s = -length / 2; s < length / 2; s += waypointSpacing) {
         float x = center_x + s * dirX + laneOffset * perpX;
         float y = center_y + s * dirY + laneOffset * perpY;
         laneWaypoints.push_back((Vector2){x, y});
     }
-
     return laneWaypoints;
-
 }
 
 Lane& Road::getRightLane() {
@@ -71,4 +111,26 @@ Lane& Road::getRightLane() {
 
 Lane& Road::getLeftLane() {
     return leftLane;
+}
+
+Rectangle Road::getBounds() {
+    bool horizontal =
+        fabs(sin(heading)) < 0.01f;
+    
+    if (horizontal) {
+        return {
+            center_x - length / 2,
+            center_y - width / 2,
+            length,
+            width
+        };
+    }
+    else {
+        return {
+            center_x - width / 2,
+            center_y - length / 2,
+            width,
+            length
+        };
+    }
 }
