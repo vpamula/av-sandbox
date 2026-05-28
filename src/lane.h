@@ -2,11 +2,15 @@
 #include "raylib.h"
 #include <vector>
 
+class Road;
 class Lane {
     public:
         Lane(float center_x, float center_y, float heading, float width, float length);
         std::vector<Vector2> generateWaypoints();
         Vector2 getDirection();
+        int getId() const {
+            return id;
+        }
         float getCenterX() {
             return center_x;
         }
@@ -26,11 +30,21 @@ class Lane {
 
         std::vector<Vector2> generateWaypointsBetween(Vector2 startPoint, Vector2 endPoint);
 
+        void setParentRoad(Road* road) {
+            parentRoad = road;
+        }
+
+        Road* getParentRoad() {
+            return parentRoad;
+        }
+
     private:
+        int id;
+        static int nextId;
         float center_x;
         float center_y;
         float heading;
         float width;
         float length;
-
+        Road* parentRoad = nullptr;
 };

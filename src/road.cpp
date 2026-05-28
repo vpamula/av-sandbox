@@ -3,12 +3,14 @@
 
 Road::Road(float center_x, float center_y, float heading, float width, float length) 
 : rightLane(center_x + cos(heading + PI/2) * width / 4, center_y + sin(heading + PI/2) * width / 4, heading, width / 2, length),
-leftLane(center_x, center_y - width / 4, heading + PI, width / 2, length) {
+leftLane(center_x - cos(heading + PI/2) * width / 4, center_y - sin(heading + PI/2) * width / 4, heading + PI, width / 2, length) {
     this->center_x = center_x;
     this->center_y = center_y;
     this->heading = heading;
     this->width = width;
     this->length = length;
+    rightLane.setParentRoad(this);
+    leftLane.setParentRoad(this);
 }
 
 void Road::Draw(const std::vector<Intersection>& intersections) {

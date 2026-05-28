@@ -2,13 +2,15 @@
 #include "raymath.h"
 #include <cmath>
 
+int Lane::nextId = 0;
+
 Lane::Lane(float center_x, float center_y, float heading, float width, float length) {
     this->center_x = center_x;
     this->center_y = center_y;
     this->heading = heading;
     this->width = width;
     this->length = length;
-
+    id = nextId++;
 }
 
 std::vector<Vector2> Lane::generateWaypoints() {

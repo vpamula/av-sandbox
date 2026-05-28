@@ -30,6 +30,8 @@ add_executable(av-sandbox
 
     src/intersection.cpp
 
+    src/route.cpp
+
 )
 
 target_link_libraries(av-sandbox raylib)

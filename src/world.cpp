@@ -1,4 +1,5 @@
 #include "world.h"
+#include <iostream>
 
 void World::addRoad(Road road) {
     roads.push_back(road);
@@ -21,7 +22,6 @@ void World::computeIntersections() {
             Rectangle b = roads[j].getBounds();
 
             if (CheckCollisionRecs(a, b)) {
-
                 float left = std::max(
                     a.x,
                     b.x
@@ -49,9 +49,15 @@ void World::computeIntersections() {
                     bottom - top
                 };
 
-                intersections.push_back(
-                    Intersection(overlap)
-                );
+                Intersection intersection(overlap);
+
+                intersection.addLane(&roads[i].getRightLane());
+                intersection.addLane(&roads[i].getLeftLane());
+                intersection.addLane(&roads[j].getRightLane());
+                intersection.addLane(&roads[j].getLeftLane());
+                intersection.computeTransitions();
+                intersections.push_back(intersection);
+                std::cout << "Intersection created with " << intersection.getConnectedLanes().size() << " lanes\n";
             }
         }
     }

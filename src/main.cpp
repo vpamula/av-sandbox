@@ -1,6 +1,7 @@
 #include "raylib.h"
 #include "vehicle.h"
 #include "road.h"
+#include "route.h"
 #include "path.h"
 #include "lanefollower.h"
 #include "trajectorygenerator.h"
@@ -11,12 +12,7 @@ int main()
 {
     const int SCREEN_WIDTH = 1920;
     const int SCREEN_HEIGHT = 930;
-
-    InitWindow(
-        SCREEN_WIDTH,
-        SCREEN_HEIGHT,
-        "AV Sandbox"
-    );
+    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "AV Sandbox");
 
     SetTargetFPS(60);
 
@@ -74,55 +70,42 @@ int main()
 
     world.computeIntersections();
 
-    std::vector<Road>& roads =
-        world.getRoads();
+    std::vector<Road>& roads = world.getRoads();
+    Route route;
 
-    Lane& horizontalLane =
-        roads[0].getRightLane();
+    route.addLane(&roads[0].getRightLane());
+    route.addLane(&roads[1].getRightLane());
+    route.addLane(&roads[3].getRightLane());
 
-    Lane& verticalLane =
-        roads[1].getRightLane();
-
-    ConnectionData connection =
-        PathBuilder::connectLanes(
-            horizontalLane,
-            verticalLane
-        );
-
-    Path path =
-        connection.path;
+    Path path = PathBuilder::buildRoute(route);
 
     Vehicle vehicle(
         0.0f,
-        horizontalLane.getCenterY(),
+        roads[0].getRightLane().getCenterY(),
         VEHICLE_LENGTH,
         VEHICLE_WIDTH
     );
 
     LaneFollower controller;
-
-    controller.reacquireWaypoint(
-        vehicle,
-        path.getWaypoints()
-    );
-
+    controller.reacquireWaypoint(vehicle, path.getWaypoints());
     Camera2D camera = { 0 };
-
-    camera.offset = (Vector2) {
-        SCREEN_WIDTH / 2,
-        SCREEN_HEIGHT / 2
-    };
-
+    camera.offset = (Vector2) {SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2};
     camera.zoom = 1.0f;
-
     bool autonomousMode = true;
 
-    while (!WindowShouldClose())
-    {
+    while (!WindowShouldClose()) {
         float dt = GetFrameTime();
-
+        if (IsKeyPressed(KEY_TAB)) {
+            autonomousMode =
+                !autonomousMode;
+            if (autonomousMode) {
+                controller.reacquireWaypoint(
+                    vehicle,
+                    path.getWaypoints()
+                );
+            }
+        }
         if (autonomousMode) {
-
             controller.Update(
                 vehicle,
                 path.getWaypoints(),
@@ -130,22 +113,7 @@ int main()
             );
         }
         else {
-
             vehicle.setSpeed(200.0f);
-        }
-
-        if (IsKeyPressed(KEY_TAB))
-        {
-            autonomousMode =
-                !autonomousMode;
-
-            if (autonomousMode)
-            {
-                controller.reacquireWaypoint(
-                    vehicle,
-                    path.getWaypoints()
-                );
-            }
         }
 
         vehicle.Update(dt);
@@ -156,71 +124,23 @@ int main()
         };
 
         BeginDrawing();
-
         ClearBackground(DARKGREEN);
-
         BeginMode2D(camera);
-
         world.Draw();
-
         path.Draw();
-
         vehicle.Draw();
-
         EndMode2D();
-
-        DrawText(
-            "AV Sandbox",
-            20,
-            20,
-            30,
-            WHITE
-        );
+        DrawText("AV Sandbox", 20, 20, 30, WHITE);
 
         if (autonomousMode) {
-
-            DrawText(
-                "AUTO",
-                20,
-                60,
-                30,
-                GREEN
-            );
+            DrawText("AUTO", 20, 60, 30, GREEN);
         }
         else {
-
-            DrawText(
-                "MANUAL",
-                20,
-                60,
-                30,
-                RED
-            );
+            DrawText("MANUAL", 20, 60, 30, RED);
         }
 
-        DrawText(
-            TextFormat(
-                "Speed: %.1f",
-                vehicle.getSpeed()
-            ),
-            20,
-            100,
-            30,
-            WHITE
-        );
-
-        DrawText(
-            TextFormat(
-                "Heading Angle: %.2f",
-                vehicle.getHeading()
-                * RAD2DEG
-            ),
-            20,
-            140,
-            30,
-            WHITE
-        );
-
+        DrawText(TextFormat("Speed: %.1f",vehicle.getSpeed()), 20, 100, 30, WHITE);
+        DrawText(TextFormat("Heading Angle: %.2f", vehicle.getHeading() * RAD2DEG), 20, 140, 30, WHITE);
         EndDrawing();
     }
 
