@@ -1,38 +1,30 @@
 #include "lane.h"
 
-#include <cmath>
+#include "raymath.h"
 
-namespace {
-constexpr float WAYPOINT_SPACING = 100.0f;
-}
+#include <algorithm>
+#include <utility>
 
-Lane::Lane(float centerX, float centerY, float heading, float length)
-    : centerX(centerX), centerY(centerY), heading(heading), length(length) {}
+Lane::Lane(std::vector<Vector2> points) : waypoints(std::move(points)) {}
 
-std::vector<Vector2> Lane::generateWaypoints() const {
-    std::vector<Vector2> waypoints;
-    const Vector2 direction = getDirection();
-
-    for (float distance = -length / 2.0f; distance <= length / 2.0f; distance += WAYPOINT_SPACING) {
-        waypoints.push_back({
-            centerX + direction.x * distance,
-            centerY + direction.y * distance
-        });
+Vector2 Lane::getDirectionAt(std::size_t waypointIndex) const {
+    if (waypoints.size() < 2) {
+        return { 1.0f, 0.0f };
     }
 
+    const std::size_t current = std::min(waypointIndex, waypoints.size() - 1);
+    const std::size_t previous = current == 0 ? current : current - 1;
+    const std::size_t next = current + 1 < waypoints.size() ? current + 1 : current;
+    Vector2 direction = Vector2Subtract(waypoints[next], waypoints[previous]);
+    const float length = Vector2Length(direction);
+
+    if (length <= 0.0001f) {
+        return { 1.0f, 0.0f };
+    }
+
+    return Vector2Scale(direction, 1.0f / length);
+}
+
+const std::vector<Vector2>& Lane::getWaypoints() const {
     return waypoints;
-}
-
-Vector2 Lane::getDirection() const {
-    return { std::cos(heading), std::sin(heading) };
-}
-
-Vector2 Lane::getStartPoint() const {
-    const Vector2 direction = getDirection();
-    return { centerX - direction.x * length / 2.0f, centerY - direction.y * length / 2.0f };
-}
-
-Vector2 Lane::getEndPoint() const {
-    const Vector2 direction = getDirection();
-    return { centerX + direction.x * length / 2.0f, centerY + direction.y * length / 2.0f };
 }

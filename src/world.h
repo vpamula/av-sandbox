@@ -9,6 +9,8 @@
 
 class World {
 public:
+    static World makeDowntownGrid();
+
     void addRoad(Road road);
     void computeIntersections();
     void Draw() const;

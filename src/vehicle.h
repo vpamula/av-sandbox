@@ -13,6 +13,7 @@ public:
     float getY() const { return y; }
     float getHeading() const { return heading; }
     float getSpeed() const { return speed; }
+    float getLength() const { return length; }
 
     void setSteeringAngle(float angle) { steeringAngle = angle; }
     void setSpeed(float newSpeed) { speed = newSpeed; }

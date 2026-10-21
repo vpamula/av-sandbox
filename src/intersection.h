@@ -8,9 +8,10 @@
 
 class Intersection {
 public:
-    explicit Intersection(Rectangle bounds);
+    Intersection(Rectangle bounds, std::vector<Vector2> surfacePolygon);
 
     Rectangle getBounds() const;
+    bool containsPoint(Vector2 point) const;
     void Draw() const;
     void addLane(Lane* lane);
     const std::vector<Lane*>& getConnectedLanes() const;
@@ -21,6 +22,7 @@ private:
     bool isValidTransition(const Lane* incomingLane, const Lane* outgoingLane) const;
 
     Rectangle bounds;
+    std::vector<Vector2> surfacePolygon;
     std::vector<Lane*> connectedLanes;
     std::unordered_map<const Lane*, std::vector<Lane*>> transitions;
 };

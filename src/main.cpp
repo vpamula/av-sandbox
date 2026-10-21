@@ -12,68 +12,20 @@ int main()
 {
     const int SCREEN_WIDTH = 1920;
     const int SCREEN_HEIGHT = 930;
-    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "AV Sandbox");
+    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "AV Sandbox - 5x5 Downtown Grid");
 
     SetTargetFPS(60);
 
     const float VEHICLE_LENGTH = 80.0f;
     const float VEHICLE_WIDTH = 40.0f;
 
-    const float LANE_WIDTH = 100.0f;
-    const float ROAD_WIDTH = 2.0f * LANE_WIDTH;
-
-    const float ROAD_LENGTH_LONG = 5000.0f;
-    const float ROAD_LENGTH_MEDIUM = 2000.0f;
-    const float ROAD_LENGTH_SHORT = 1200.0f;
-
-    World world;
-
-    world.addRoad(
-        Road(
-            0.0f,
-            0.0f,
-            0.0f,
-            ROAD_WIDTH,
-            ROAD_LENGTH_LONG
-        )
-    );
-
-    world.addRoad(
-        Road(
-            1000.0f,
-            400.0f,
-            PI / 2,
-            ROAD_WIDTH,
-            ROAD_LENGTH_MEDIUM
-        )
-    );
-
-    world.addRoad(
-        Road(
-            2400.0f,
-            500.0f,
-            PI / 2,
-            ROAD_WIDTH,
-            ROAD_LENGTH_SHORT
-        )
-    );
-
-    world.addRoad(
-        Road(
-            0.0f,
-            1000.0f,
-            0.0f,
-            ROAD_WIDTH,
-            ROAD_LENGTH_LONG
-        )
-    );
-
-    world.computeIntersections();
-
+    World world = World::makeDowntownGrid();
     const std::vector<Road>& roads = world.getRoads();
+    const std::vector<Vector2>& startingLane = roads[2].getRightLane().getWaypoints();
+    const Vector2 vehicleStart = startingLane[startingLane.size() / 2];
     Vehicle vehicle(
-        0.0f,
-        roads[0].getRightLane().getCenter().y,
+        vehicleStart.x,
+        vehicleStart.y,
         VEHICLE_LENGTH,
         VEHICLE_WIDTH
     );
@@ -81,7 +33,7 @@ int main()
     LaneFollower controller;
     Camera2D camera = { 0 };
     camera.offset = (Vector2) {SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2};
-    camera.zoom = 1.0f;
+    camera.zoom = 0.31f;
 
     bool autonomousMode = true;
     bool routeSelected = false;
@@ -91,6 +43,7 @@ int main()
     bool leftDragPan = false;
     Vector2 leftDragStart = {0.0f, 0.0f};
     Vector2 startRoutePoint = {0.0f, 0.0f};
+    Vector2 startRouteClickPoint = {0.0f, 0.0f};
     std::vector<Vector2> routeToSelectedStart;
     std::vector<Vector2> routeFromSelectedStart;
     bool drivingToSelectedStart = false;
@@ -122,6 +75,7 @@ int main()
             routeFromSelectedStart.clear();
             drivingToSelectedStart = false;
             routeCompleted = false;
+            startRouteClickPoint = {0.0f, 0.0f};
             autonomousMode = true;
         }
 
@@ -145,6 +99,7 @@ int main()
             float dragDistance = std::hypot(dragDelta.x, dragDelta.y);
             if (dragDistance > 8.0f) {
                 panningCamera = true;
+                followVehicleCamera = false;
             }
             else {
                 panningCamera = false;
@@ -164,6 +119,7 @@ int main()
             if (snappedPoint.has_value()) {
                 if (!routeSelected) {
                     startRoutePoint = snappedPoint.value();
+                    startRouteClickPoint = mouseWorld;
                     routeSelected = true;
                     routeToSelectedStart.clear();
                     routeFromSelectedStart.clear();
@@ -171,10 +127,16 @@ int main()
                     routeCompleted = false;
                 }
                 else {
-                    const Vector2 endRoutePoint = snappedPoint.value();
+                    const Vector2 endRoutePoint = mouseWorld;
                     const Vector2 vehiclePosition = { vehicle.getX(), vehicle.getY() };
-                    routeToSelectedStart = world.buildRouteBetweenPoints(vehiclePosition, startRoutePoint);
-                    routeFromSelectedStart = world.buildRouteBetweenPoints(startRoutePoint, endRoutePoint);
+                    routeFromSelectedStart = world.buildRouteBetweenPoints(
+                        startRouteClickPoint,
+                        endRoutePoint
+                    );
+                    if (!routeFromSelectedStart.empty()) {
+                        startRoutePoint = routeFromSelectedStart.front();
+                        routeToSelectedStart = world.buildRouteBetweenPoints(vehiclePosition, startRoutePoint);
+                    }
 
                     if (!routeToSelectedStart.empty() && !routeFromSelectedStart.empty()) {
                         // The graph route starts at its nearest lane node. Keep
@@ -201,14 +163,12 @@ int main()
 
                     routeSelected = false;
                     startRoutePoint = {0.0f, 0.0f};
+                    startRouteClickPoint = {0.0f, 0.0f};
                 }
             }
 
             leftDragPan = false;
             panningCamera = false;
-            if (!paused) {
-                followVehicleCamera = true;
-            }
             continue;
         }
 
@@ -216,9 +176,6 @@ int main()
             leftDragPan = false;
             if (!IsMouseButtonDown(MOUSE_RIGHT_BUTTON) && !IsMouseButtonDown(MOUSE_MIDDLE_BUTTON)) {
                 panningCamera = false;
-            }
-            if (!paused && !panningCamera) {
-                followVehicleCamera = true;
             }
         }
 
@@ -290,7 +247,7 @@ int main()
             vehicle.setSpeed(0.0f);
         }
 
-        if (!panningCamera && followVehicleCamera) {
+        if (!paused && !panningCamera && followVehicleCamera) {
             camera.target = (Vector2) {
                 vehicle.getX(),
                 vehicle.getY()
@@ -336,15 +293,16 @@ int main()
         const char* motionStatus = routeCompleted ? "ARRIVED" : (paused ? "PAUSED" : "RUNNING");
         const Color motionStatusColor = routeCompleted ? SKYBLUE : (paused ? YELLOW : GREEN);
         DrawText(motionStatus, 20, 180, 30, motionStatusColor);
-        DrawText("BLUE: current position to start click", 20, 220, 18, SKYBLUE);
-        DrawText("YELLOW: start click to destination click", 20, 245, 18, YELLOW);
+        DrawText("5x5 BLOCK GRID WITH CURVED STREETS", 20, 220, 18, WHITE);
+        DrawText("BLUE: current position to start click", 20, 245, 18, SKYBLUE);
+        DrawText("YELLOW: start click to destination click", 20, 270, 18, YELLOW);
 
         const int bottomLeftX = 20;
         const int bottomLeftY = SCREEN_HEIGHT - 150;
 
         DrawText("LEFT CLICK = set start point", bottomLeftX, bottomLeftY, 20, WHITE);
         DrawText("SECOND LEFT CLICK = set end point", bottomLeftX, bottomLeftY + 30, 20, WHITE);
-        DrawText("RIGHT DRAG pans camera", bottomLeftX, bottomLeftY + 60, 20, WHITE);
+        DrawText("RIGHT / MIDDLE DRAG pans; LEFT DRAG also pans", bottomLeftX, bottomLeftY + 60, 20, WHITE);
         DrawText("SPACE toggles pause", bottomLeftX, bottomLeftY + 90, 20, WHITE);
         DrawText("MOUSE WHEEL or +/- zooms camera", bottomLeftX, bottomLeftY + 120, 20, WHITE);
         DrawText("R resets route", bottomLeftX, bottomLeftY + 150, 20, WHITE);

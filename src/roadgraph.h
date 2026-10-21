@@ -2,6 +2,7 @@
 
 #include "raylib.h"
 
+#include <cstddef>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -28,8 +29,23 @@ public:
     std::vector<Vector2> findRoute(Vector2 start, Vector2 end) const;
 
 private:
-    int findOrCreateNode(Vector2 position, float tolerance);
-    void addLaneNode(const Lane* lane, int nodeIndex);
+    struct BoundaryNode {
+        int nodeIndex;
+        std::size_t waypointIndex;
+    };
+    struct NearbyNode {
+        int nodeIndex;
+        float distance;
+    };
+
+    std::optional<BoundaryNode> findLaneBoundaryNode(
+        const std::vector<int>& candidates,
+        const Lane& lane,
+        Vector2 junctionCenter,
+        Rectangle junctionBounds,
+        bool incomingBoundary
+    ) const;
+    std::vector<NearbyNode> findNearbyNodes(Vector2 worldPoint, float maxDistance, float tieTolerance) const;
     std::optional<int> findNearestNode(Vector2 worldPoint, float maxDistance) const;
 
     static std::vector<Vector2> buildTransitionSpline(

@@ -15,6 +15,4 @@ public:
 
 private:
     std::size_t currentWaypointIndex = 0;
-    float steeringGain = 5.0f;
-    std::size_t lookaheadPoints = 5;
 };

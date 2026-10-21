@@ -1,22 +1,17 @@
 #pragma once
 
 #include "raylib.h"
+
+#include <cstddef>
 #include <vector>
 
 class Lane {
 public:
-    Lane(float centerX, float centerY, float heading, float length);
+    explicit Lane(std::vector<Vector2> waypoints);
 
-    std::vector<Vector2> generateWaypoints() const;
-    Vector2 getDirection() const;
-    Vector2 getCenter() const { return { centerX, centerY }; }
-
-    Vector2 getStartPoint() const;
-    Vector2 getEndPoint() const;
+    Vector2 getDirectionAt(std::size_t waypointIndex) const;
+    const std::vector<Vector2>& getWaypoints() const;
 
 private:
-    float centerX;
-    float centerY;
-    float heading;
-    float length;
+    std::vector<Vector2> waypoints;
 };
