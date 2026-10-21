@@ -208,6 +208,21 @@ std::vector<Vector2> makeIntersectionSurface(Vector2 center, const Road& first, 
     return { *negativeNegative, *positiveNegative, *positivePositive, *negativePositive };
 }
 
+Rectangle makeIntersectionBounds(Vector2 center, const std::vector<Vector2>& surface) {
+    float halfWidth = INTERSECTION_DRAW_SIZE * 0.5f;
+    float halfHeight = INTERSECTION_DRAW_SIZE * 0.5f;
+    for (const Vector2 point : surface) {
+        halfWidth = std::max(halfWidth, std::abs(point.x - center.x));
+        halfHeight = std::max(halfHeight, std::abs(point.y - center.y));
+    }
+    return {
+        center.x - halfWidth,
+        center.y - halfHeight,
+        halfWidth * 2.0f,
+        halfHeight * 2.0f
+    };
+}
+
 std::vector<std::array<Vector2, 4>> makeSidewalkCorners(
     Vector2 center,
     const Road& first,
@@ -351,6 +366,7 @@ World World::makeDowntownGrid() {
     constexpr int BLOCKS_PER_SIDE = 5;
     constexpr float BLOCK_SPACING = 500.0f;
     constexpr float ROAD_WIDTH = 220.0f;
+    constexpr float MULTILANE_ROAD_WIDTH = 300.0f;
     constexpr float ROAD_SAMPLE_SPACING = 20.0f;
     constexpr float CURVE_AMPLITUDE = 75.0f;
 
@@ -378,7 +394,12 @@ World World::makeDowntownGrid() {
         }
         const float endPhase = (mapEnd - gridCoordinates.front()) * frequency;
         centerline.push_back({ mapEnd, baseY + amplitude * std::sin(endPhase) });
-        world.addRoad(Road(std::move(centerline), ROAD_WIDTH));
+        const bool multilane = row == 2 || row == 4;
+        world.addRoad(Road(
+            std::move(centerline),
+            multilane ? MULTILANE_ROAD_WIDTH : ROAD_WIDTH,
+            multilane ? 2 : 1
+        ));
     };
 
     auto addVerticalStreet = [&](int column) {
@@ -395,7 +416,12 @@ World World::makeDowntownGrid() {
         }
         const float endPhase = (mapEnd - gridCoordinates.front()) * frequency;
         centerline.push_back({ baseX + amplitude * std::sin(endPhase), mapEnd });
-        world.addRoad(Road(std::move(centerline), ROAD_WIDTH));
+        const bool multilane = column == 1 || column == 4;
+        world.addRoad(Road(
+            std::move(centerline),
+            multilane ? MULTILANE_ROAD_WIDTH : ROAD_WIDTH,
+            multilane ? 2 : 1
+        ));
     };
 
     for (int row = 0; row <= BLOCKS_PER_SIDE; ++row) {
@@ -560,21 +586,23 @@ void World::computeIntersections() {
     for (std::size_t firstRoad = 0; firstRoad < roads.size(); ++firstRoad) {
         for (std::size_t secondRoad = firstRoad + 1; secondRoad < roads.size(); ++secondRoad) {
             for (const Vector2 center : findCenterlineIntersections(roads[firstRoad], roads[secondRoad])) {
-                const float halfSize = INTERSECTION_DRAW_SIZE * 0.5f;
                 auto surface = makeIntersectionSurface(center, roads[firstRoad], roads[secondRoad]);
-                Intersection intersection({
-                    center.x - halfSize,
-                    center.y - halfSize,
-                    INTERSECTION_DRAW_SIZE,
-                    INTERSECTION_DRAW_SIZE
-                }, std::move(surface));
+                const Rectangle bounds = makeIntersectionBounds(center, surface);
+                Intersection intersection(bounds, std::move(surface));
                 intersection.setSidewalkCorners(
                     makeSidewalkCorners(center, roads[firstRoad], roads[secondRoad])
                 );
-                intersection.addLane(&roads[firstRoad].getRightLane());
-                intersection.addLane(&roads[firstRoad].getLeftLane());
-                intersection.addLane(&roads[secondRoad].getRightLane());
-                intersection.addLane(&roads[secondRoad].getLeftLane());
+                auto addRoadLanesToIntersection = [&](std::size_t roadIndex) {
+                    Road& road = roads[roadIndex];
+                    for (Lane& lane : road.getRightLanes()) {
+                        intersection.addLane(&lane, &road);
+                    }
+                    for (Lane& lane : road.getLeftLanes()) {
+                        intersection.addLane(&lane, &road);
+                    }
+                };
+                addRoadLanesToIntersection(firstRoad);
+                addRoadLanesToIntersection(secondRoad);
                 intersection.computeTransitions();
                 intersections.push_back(std::move(intersection));
             }
@@ -747,13 +775,13 @@ void World::rebuildGraph() {
     graph = RoadGraph();
 
     for (const Road& road : roads) {
-        graph.addRoad(road);
+        graph.addRoad(road, intersections);
     }
 
     for (const Intersection& intersection : intersections) {
         for (Lane* incomingLane : intersection.getConnectedLanes()) {
             for (Lane* outgoingLane : intersection.getNextLanes(incomingLane)) {
-                graph.addLaneTransition(incomingLane, outgoingLane, intersection.getBounds());
+                graph.addLaneTransition(incomingLane, outgoingLane, intersection);
             }
         }
     }

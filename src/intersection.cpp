@@ -299,8 +299,11 @@ void Intersection::Draw() const {
     }
 
     for (const StopApproach& approach : stopApproaches) {
-        const Vector2 rightSide = { approach.direction.y, -approach.direction.x };
         DrawLineEx(approach.lineStart, approach.lineEnd, 6.0f, WHITE);
+    }
+
+    for (const StopApproach& approach : controlApproaches) {
+        const Vector2 rightSide = { approach.direction.y, -approach.direction.x };
 
         if (stopControlled) {
             const Vector2 signCenter = Vector2Add(
@@ -481,6 +484,7 @@ std::optional<RouteControlPoint> Intersection::getRouteControlAlongRoute(
 
 void Intersection::rebuildStopApproaches() {
     stopApproaches.clear();
+    controlApproaches.clear();
     if (!stopControlled && !trafficLightControlled) {
         return;
     }
@@ -547,12 +551,28 @@ void Intersection::rebuildStopApproaches() {
                 }
 
                 const Vector2 lineHalfWidth = Vector2Scale(lineDirection, STOP_LINE_HALF_WIDTH);
-                stopApproaches.push_back({
+                const auto roadForLane = laneRoads.find(lane);
+                const Road* road = roadForLane == laneRoads.end() ? nullptr : roadForLane->second;
+                const StopApproach approach = {
                     lineCenter,
                     Vector2Subtract(lineCenter, lineHalfWidth),
                     Vector2Add(lineCenter, lineHalfWidth),
-                    direction
-                });
+                    direction,
+                    road
+                };
+                stopApproaches.push_back(approach);
+
+                const bool approachAlreadyDisplayed = std::any_of(
+                    controlApproaches.begin(),
+                    controlApproaches.end(),
+                    [&](const StopApproach& displayed) {
+                        return displayed.road == road &&
+                            Vector2DotProduct(displayed.direction, direction) > 0.98f;
+                    }
+                );
+                if (!approachAlreadyDisplayed) {
+                    controlApproaches.push_back(approach);
+                }
                 break;
             }
 
@@ -561,8 +581,14 @@ void Intersection::rebuildStopApproaches() {
     }
 }
 
-void Intersection::addLane(Lane* lane) {
+void Intersection::addLane(Lane* lane, const Road* road) {
     connectedLanes.push_back(lane);
+    laneRoads[lane] = road;
+}
+
+const Road* Intersection::getRoadForLane(const Lane* lane) const {
+    const auto road = laneRoads.find(lane);
+    return road == laneRoads.end() ? nullptr : road->second;
 }
 
 const std::vector<Lane*>& Intersection::getConnectedLanes() const {
@@ -593,6 +619,15 @@ bool Intersection::isValidTransition(const Lane* incomingLane, const Lane* outgo
         return false;
     }
 
+    const auto incomingRoad = laneRoads.find(incomingLane);
+    const auto outgoingRoad = laneRoads.find(outgoingLane);
+    if (incomingRoad != laneRoads.end() && outgoingRoad != laneRoads.end() &&
+        incomingRoad->second == outgoingRoad->second) {
+        // Keep lane changes on the road segment itself. The intersection graph
+        // only connects a road to a different road through a junction.
+        return false;
+    }
+
     const Vector2 center = {
         bounds.x + bounds.width * 0.5f,
         bounds.y + bounds.height * 0.5f
@@ -617,7 +652,7 @@ bool Intersection::isValidTransition(const Lane* incomingLane, const Lane* outgo
     const Vector2 outgoingDirection = directionAtIntersection(outgoingLane);
     const float directionDot = Vector2DotProduct(incomingDirection, outgoingDirection);
 
-    // The current road model has one lane in each direction. Allow straight,
-    // left, and right movements; reject only a near-180-degree U-turn.
+    // Allow straight, left, and right movements; reject only a near-180-degree
+    // U-turn. Lane changes between lanes on the same road happen mid-block.
     return directionDot > -0.8f;
 }

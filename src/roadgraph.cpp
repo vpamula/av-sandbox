@@ -1,5 +1,6 @@
 #include "roadgraph.h"
 
+#include "intersection.h"
 #include "lane.h"
 #include "raymath.h"
 #include "road.h"
@@ -13,6 +14,14 @@
 
 namespace {
 constexpr float TRANSITION_SEARCH_RADIUS = 220.0f;
+constexpr float LANE_CHANGE_SPACING = 500.0f;
+constexpr float LANE_CHANGE_LENGTH = 160.0f;
+constexpr int LANE_CHANGE_SAMPLES = 18;
+constexpr float BIKE_LANE_CLEARANCE = 36.0f;
+constexpr float BIKE_LANE_OVERLAP_WEIGHT = 6.0f;
+constexpr float CROSSWALK_CLEARANCE = 48.0f;
+constexpr float CROSSWALK_OVERLAP_WEIGHT = 8.0f;
+constexpr float TURN_HANDLE_RATIO = 0.58f;
 
 Vector2 normalizeOrZero(Vector2 value) {
     const float lengthSquared = value.x * value.x + value.y * value.y;
@@ -21,6 +30,158 @@ Vector2 normalizeOrZero(Vector2 value) {
     }
     return Vector2Scale(value, 1.0f / std::sqrt(lengthSquared));
 }
+
+float polylineLength(const std::vector<Vector2>& points) {
+    float length = 0.0f;
+    for (std::size_t index = 1; index < points.size(); ++index) {
+        length += Vector2Distance(points[index - 1], points[index]);
+    }
+    return length;
+}
+
+struct ClosestPolylineSegment {
+    float distance = std::numeric_limits<float>::infinity();
+    Vector2 direction = { 0.0f, 0.0f };
+};
+
+ClosestPolylineSegment closestPolylineSegment(
+    Vector2 point,
+    const std::vector<Vector2>& polyline
+) {
+    ClosestPolylineSegment closest;
+    for (std::size_t index = 1; index < polyline.size(); ++index) {
+        const Vector2 start = polyline[index - 1];
+        const Vector2 segment = Vector2Subtract(polyline[index], start);
+        const float segmentLengthSquared = Vector2LengthSqr(segment);
+        if (segmentLengthSquared <= 0.0001f) {
+            continue;
+        }
+
+        const float projection = std::clamp(
+            Vector2DotProduct(Vector2Subtract(point, start), segment) / segmentLengthSquared,
+            0.0f,
+            1.0f
+        );
+        const Vector2 nearest = Vector2Add(start, Vector2Scale(segment, projection));
+        const float distance = Vector2Distance(point, nearest);
+        if (distance < closest.distance) {
+            closest.distance = distance;
+            closest.direction = normalizeOrZero(segment);
+        }
+    }
+    return closest;
+}
+
+float overlapRoutingPenalty(
+    const std::vector<Vector2>& route,
+    const std::vector<const std::vector<Vector2>*>& obstacles,
+    float clearance,
+    float weight,
+    float crossingWeight
+) {
+    float penalty = 0.0f;
+    for (std::size_t index = 1; index < route.size(); ++index) {
+        const Vector2 segment = Vector2Subtract(route[index], route[index - 1]);
+        const float segmentLength = Vector2Length(segment);
+        if (segmentLength <= 0.0001f) {
+            continue;
+        }
+
+        const Vector2 midpoint = Vector2Scale(Vector2Add(route[index - 1], route[index]), 0.5f);
+        const Vector2 routeDirection = Vector2Scale(segment, 1.0f / segmentLength);
+        for (const std::vector<Vector2>* obstacle : obstacles) {
+            if (!obstacle) {
+                continue;
+            }
+            const ClosestPolylineSegment closest = closestPolylineSegment(midpoint, *obstacle);
+            if (closest.distance >= clearance) {
+                continue;
+            }
+
+            // Give unavoidable crossings a small cost and strongly discourage
+            // driving along the marked corridor. This also lets straight road
+            // segments prefer a path with fewer or shorter crosswalk overlaps.
+            const float alignment = std::abs(
+                Vector2DotProduct(routeDirection, closest.direction)
+            );
+            const float parallelism = std::clamp((alignment - 0.35f) / 0.65f, 0.0f, 1.0f);
+            const float alignmentCost = crossingWeight +
+                (1.0f - crossingWeight) * parallelism;
+            const float proximity = (clearance - closest.distance) / clearance;
+            penalty += segmentLength * proximity * alignmentCost * weight;
+        }
+    }
+    return penalty;
+}
+
+float intersectionOverlapPenalty(
+    const std::vector<Vector2>& routeSegment,
+    const Intersection& intersection
+) {
+    if (routeSegment.size() < 2) {
+        return 0.0f;
+    }
+
+    const Vector2 midpoint = Vector2Scale(
+        Vector2Add(routeSegment.front(), routeSegment.back()),
+        0.5f
+    );
+    if (!intersection.containsPointWithinDistance(midpoint, 40.0f)) {
+        return 0.0f;
+    }
+
+    std::vector<const std::vector<Vector2>*> bikeLanePaths;
+    std::vector<const Road*> connectedRoads;
+    for (const Lane* lane : intersection.getConnectedLanes()) {
+        const Road* road = intersection.getRoadForLane(lane);
+        if (!road || std::find(connectedRoads.begin(), connectedRoads.end(), road) != connectedRoads.end()) {
+            continue;
+        }
+        connectedRoads.push_back(road);
+        bikeLanePaths.push_back(&road->getRightBikeLane());
+        bikeLanePaths.push_back(&road->getLeftBikeLane());
+    }
+
+    const std::vector<std::vector<Vector2>> crossings = intersection.getPedestrianCrossings(0.0f);
+    std::vector<const std::vector<Vector2>*> crossingPaths;
+    crossingPaths.reserve(crossings.size());
+    for (const std::vector<Vector2>& crossing : crossings) {
+        crossingPaths.push_back(&crossing);
+    }
+
+    return overlapRoutingPenalty(
+        routeSegment,
+        bikeLanePaths,
+        BIKE_LANE_CLEARANCE,
+        BIKE_LANE_OVERLAP_WEIGHT,
+        0.18f
+    ) + overlapRoutingPenalty(
+        routeSegment,
+        crossingPaths,
+        CROSSWALK_CLEARANCE,
+        CROSSWALK_OVERLAP_WEIGHT,
+        0.12f
+    );
+}
+
+std::size_t waypointIndexAtDistance(const std::vector<Vector2>& points, float targetDistance) {
+    if (points.size() < 2 || targetDistance <= 0.0f) {
+        return 0;
+    }
+
+    std::size_t bestIndex = 0;
+    float bestDifference = std::abs(targetDistance);
+    float distance = 0.0f;
+    for (std::size_t index = 1; index < points.size(); ++index) {
+        distance += Vector2Distance(points[index - 1], points[index]);
+        const float difference = std::abs(distance - targetDistance);
+        if (difference < bestDifference) {
+            bestDifference = difference;
+            bestIndex = index;
+        }
+    }
+    return bestIndex;
+}
 }
 
 std::vector<Vector2> RoadGraph::buildTransitionSpline(
@@ -28,11 +189,15 @@ std::vector<Vector2> RoadGraph::buildTransitionSpline(
     Vector2 exitPoint,
     Vector2 incomingDirection,
     Vector2 outgoingDirection,
-    int samples
+    int samples,
+    float handleRatio
 ) {
     const Vector2 incomingDir = normalizeOrZero(incomingDirection);
     const Vector2 outgoingDir = normalizeOrZero(outgoingDirection);
-    const float travelLength = std::max(40.0f, Vector2Distance(entryPoint, exitPoint) * 0.5f);
+    const float travelLength = std::max(
+        40.0f,
+        Vector2Distance(entryPoint, exitPoint) * handleRatio
+    );
     const Vector2 cp1 = Vector2Add(entryPoint, Vector2Scale(incomingDir, travelLength));
     const Vector2 cp2 = Vector2Subtract(exitPoint, Vector2Scale(outgoingDir, travelLength));
 
@@ -64,33 +229,135 @@ float RoadGraph::distanceToRectangle(Vector2 point, Rectangle rect) {
     return Vector2Distance(point, { closestX, closestY });
 }
 
-void RoadGraph::addRoad(const Road& road) {
-    for (const Lane* lane : { &road.getRightLane(), &road.getLeftLane() }) {
-        const std::vector<Vector2>& lanePoints = lane->getWaypoints();
-        if (lanePoints.size() < 2) {
-            continue;
+void RoadGraph::addRoad(const Road& road, const std::vector<Intersection>& intersections) {
+    auto addDirectionalLanes = [&](const std::vector<Lane>& lanes) {
+        for (const Lane& laneValue : lanes) {
+            const Lane* lane = &laneValue;
+            const std::vector<Vector2>& lanePoints = lane->getWaypoints();
+            if (lanePoints.size() < 2) {
+                continue;
+            }
+
+            std::vector<int>& laneNodeIndices = laneNodes[lane];
+            laneNodeIndices.reserve(lanePoints.size());
+
+            for (const Vector2 point : lanePoints) {
+                const int nodeIndex = static_cast<int>(nodes.size());
+                nodes.push_back({ point, {} });
+                laneNodeIndices.push_back(nodeIndex);
+            }
+
+            for (std::size_t index = 0; index + 1 < laneNodeIndices.size(); ++index) {
+                RoadGraphEdge edge;
+                edge.startNode = laneNodeIndices[index];
+                edge.endNode = laneNodeIndices[index + 1];
+                edge.points = { lanePoints[index], lanePoints[index + 1] };
+                for (const Intersection& intersection : intersections) {
+                    edge.routingPenalty += intersectionOverlapPenalty(edge.points, intersection);
+                }
+
+                const int edgeIndex = static_cast<int>(edges.size());
+                edges.push_back(std::move(edge));
+                nodes[static_cast<std::size_t>(laneNodeIndices[index])].outgoingEdges.push_back(edgeIndex);
+            }
         }
 
-        std::vector<int>& laneNodeIndices = laneNodes[lane];
-        laneNodeIndices.reserve(lanePoints.size());
+        for (std::size_t laneIndex = 1; laneIndex < lanes.size(); ++laneIndex) {
+            const Lane& firstLane = lanes[laneIndex - 1];
+            const Lane& secondLane = lanes[laneIndex];
+            const std::vector<int>& firstNodes = laneNodes[&firstLane];
+            const std::vector<int>& secondNodes = laneNodes[&secondLane];
+            const float availableLength = std::min(
+                polylineLength(firstLane.getWaypoints()),
+                polylineLength(secondLane.getWaypoints())
+            );
 
-        for (const Vector2 point : lanePoints) {
-            const int nodeIndex = static_cast<int>(nodes.size());
-            nodes.push_back({ point, {} });
-            laneNodeIndices.push_back(nodeIndex);
+            for (float centerDistance = LANE_CHANGE_SPACING;
+                 centerDistance < availableLength;
+                 centerDistance += LANE_CHANGE_SPACING) {
+                const float startDistance = centerDistance - LANE_CHANGE_LENGTH * 0.5f;
+                const float endDistance = centerDistance + LANE_CHANGE_LENGTH * 0.5f;
+                if (startDistance < 0.0f || endDistance >= availableLength) {
+                    continue;
+                }
+
+                const std::size_t firstStartIndex = waypointIndexAtDistance(
+                    firstLane.getWaypoints(), startDistance
+                );
+                const std::size_t secondStartIndex = waypointIndexAtDistance(
+                    secondLane.getWaypoints(), startDistance
+                );
+                const std::size_t firstEndIndex = waypointIndexAtDistance(
+                    firstLane.getWaypoints(), endDistance
+                );
+                const std::size_t secondEndIndex = waypointIndexAtDistance(
+                    secondLane.getWaypoints(), endDistance
+                );
+                if (firstStartIndex >= firstNodes.size() || firstEndIndex >= firstNodes.size() ||
+                    secondStartIndex >= secondNodes.size() || secondEndIndex >= secondNodes.size()) {
+                    continue;
+                }
+
+                auto addLaneChange = [&](
+                    const Lane& fromLane,
+                    std::size_t fromWaypoint,
+                    const std::vector<int>& fromNodes,
+                    const Lane& toLane,
+                    std::size_t toWaypoint,
+                    const std::vector<int>& toNodes
+                ) {
+                    RoadGraphEdge edge;
+                    edge.startNode = fromNodes[fromWaypoint];
+                    edge.endNode = toNodes[toWaypoint];
+                    edge.points = buildTransitionSpline(
+                        nodes[static_cast<std::size_t>(edge.startNode)].position,
+                        nodes[static_cast<std::size_t>(edge.endNode)].position,
+                        fromLane.getDirectionAt(fromWaypoint),
+                        toLane.getDirectionAt(toWaypoint),
+                        LANE_CHANGE_SAMPLES
+                    );
+                    const bool crossesIntersection = std::any_of(
+                        intersections.begin(),
+                        intersections.end(),
+                        [&](const Intersection& intersection) {
+                            return std::any_of(
+                                edge.points.begin(),
+                                edge.points.end(),
+                                [&](Vector2 point) { return intersection.containsPoint(point); }
+                            );
+                        }
+                    );
+                    if (crossesIntersection) {
+                        return;
+                    }
+
+                    const int edgeIndex = static_cast<int>(edges.size());
+                    edges.push_back(std::move(edge));
+                    nodes[static_cast<std::size_t>(edges.back().startNode)].outgoingEdges.push_back(edgeIndex);
+                };
+
+                addLaneChange(
+                    firstLane,
+                    firstStartIndex,
+                    firstNodes,
+                    secondLane,
+                    secondEndIndex,
+                    secondNodes
+                );
+                addLaneChange(
+                    secondLane,
+                    secondStartIndex,
+                    secondNodes,
+                    firstLane,
+                    firstEndIndex,
+                    firstNodes
+                );
+            }
         }
+    };
 
-        for (std::size_t index = 0; index + 1 < laneNodeIndices.size(); ++index) {
-            RoadGraphEdge edge;
-            edge.startNode = laneNodeIndices[index];
-            edge.endNode = laneNodeIndices[index + 1];
-            edge.points = { lanePoints[index], lanePoints[index + 1] };
-
-            const int edgeIndex = static_cast<int>(edges.size());
-            edges.push_back(std::move(edge));
-            nodes[static_cast<std::size_t>(laneNodeIndices[index])].outgoingEdges.push_back(edgeIndex);
-        }
-    }
+    addDirectionalLanes(road.getRightLanes());
+    addDirectionalLanes(road.getLeftLanes());
 }
 
 std::optional<RoadGraph::BoundaryNode> RoadGraph::findLaneBoundaryNode(
@@ -138,7 +405,7 @@ std::optional<RoadGraph::BoundaryNode> RoadGraph::findLaneBoundaryNode(
 void RoadGraph::addLaneTransition(
     const Lane* incomingLane,
     const Lane* outgoingLane,
-    Rectangle junctionBounds
+    const Intersection& intersection
 ) {
     if (!incomingLane || !outgoingLane) {
         return;
@@ -150,6 +417,7 @@ void RoadGraph::addLaneTransition(
         return;
     }
 
+    const Rectangle junctionBounds = intersection.getBounds();
     const Vector2 junctionCenter = {
         junctionBounds.x + junctionBounds.width * 0.5f,
         junctionBounds.y + junctionBounds.height * 0.5f
@@ -181,7 +449,41 @@ void RoadGraph::addLaneTransition(
         entryPoint,
         exitPoint,
         incomingLane->getDirectionAt(incomingBoundary->waypointIndex),
-        outgoingLane->getDirectionAt(outgoingBoundary->waypointIndex)
+        outgoingLane->getDirectionAt(outgoingBoundary->waypointIndex),
+        18,
+        TURN_HANDLE_RATIO
+    );
+
+    std::vector<const std::vector<Vector2>*> bikeLanePaths;
+    std::vector<const std::vector<Vector2>*> crossingPaths;
+    std::vector<const Road*> connectedRoads;
+    for (const Lane* lane : intersection.getConnectedLanes()) {
+        const Road* road = intersection.getRoadForLane(lane);
+        if (!road || std::find(connectedRoads.begin(), connectedRoads.end(), road) != connectedRoads.end()) {
+            continue;
+        }
+        connectedRoads.push_back(road);
+        bikeLanePaths.push_back(&road->getRightBikeLane());
+        bikeLanePaths.push_back(&road->getLeftBikeLane());
+    }
+
+    const std::vector<std::vector<Vector2>> crossings = intersection.getPedestrianCrossings(0.0f);
+    crossingPaths.reserve(crossings.size());
+    for (const std::vector<Vector2>& crossing : crossings) {
+        crossingPaths.push_back(&crossing);
+    }
+    edge.routingPenalty = overlapRoutingPenalty(
+        edge.points,
+        bikeLanePaths,
+        BIKE_LANE_CLEARANCE,
+        BIKE_LANE_OVERLAP_WEIGHT,
+        0.18f
+    ) + overlapRoutingPenalty(
+        edge.points,
+        crossingPaths,
+        CROSSWALK_CLEARANCE,
+        CROSSWALK_OVERLAP_WEIGHT,
+        0.12f
     );
 
     const int edgeIndex = static_cast<int>(edges.size());
@@ -296,7 +598,7 @@ std::vector<Vector2> RoadGraph::findRoute(Vector2 start, Vector2 end) const {
             }
 
             const std::size_t nextNode = static_cast<std::size_t>(edge.endNode);
-            const float nextCost = currentCost + edgeLength;
+            const float nextCost = currentCost + edgeLength + edge.routingPenalty;
             if (nextCost < cost[nextNode]) {
                 cost[nextNode] = nextCost;
                 previous[nextNode] = currentNode;

@@ -4,14 +4,22 @@
 #include "lane.h"
 #include "raylib.h"
 
+#include <cstddef>
 #include <vector>
 
 class Road {
 public:
     static constexpr float SIDEWALK_WIDTH = 30.0f;
 
-    Road(float centerX, float centerY, float heading, float width, float length);
-    Road(std::vector<Vector2> centerline, float width);
+    Road(
+        float centerX,
+        float centerY,
+        float heading,
+        float width,
+        float length,
+        std::size_t lanesPerDirection = 1
+    );
+    Road(std::vector<Vector2> centerline, float width, std::size_t lanesPerDirection = 1);
 
     void Draw(
         const std::vector<Intersection>& intersections,
@@ -21,6 +29,10 @@ public:
     const Lane& getRightLane() const;
     Lane& getLeftLane();
     const Lane& getLeftLane() const;
+    std::vector<Lane>& getRightLanes();
+    const std::vector<Lane>& getRightLanes() const;
+    std::vector<Lane>& getLeftLanes();
+    const std::vector<Lane>& getLeftLanes() const;
     float getWidth() const;
     Rectangle getPavedBounds() const;
     const std::vector<Vector2>& getCenterline() const;
@@ -43,12 +55,19 @@ private:
         float offset,
         bool reverse
     );
+    static std::vector<Lane> makeDirectionalLanes(
+        const std::vector<Vector2>& points,
+        float roadWidth,
+        std::size_t lanesPerDirection,
+        bool reverse
+    );
 
     std::vector<Vector2> centerline;
     float width;
+    std::size_t lanesPerDirection;
     Rectangle pavedBounds;
-    Lane rightLane;
-    Lane leftLane;
+    std::vector<Lane> rightLanes;
+    std::vector<Lane> leftLanes;
     std::vector<Vector2> rightBikeLane;
     std::vector<Vector2> leftBikeLane;
     std::vector<Vector2> rightSidewalk;

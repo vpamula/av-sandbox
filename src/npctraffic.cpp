@@ -59,12 +59,16 @@ Vector2 NpcTraffic::randomRoadPoint(const World& world) {
     }
 
     std::uniform_int_distribution<std::size_t> chooseRoad(0, roads.size() - 1);
-    std::uniform_int_distribution<int> chooseLane(0, 1);
+    std::uniform_int_distribution<int> chooseDirection(0, 1);
     Vector2 fallback = { 0.0f, 0.0f };
 
     for (int attempt = 0; attempt < 80; ++attempt) {
         const Road& road = roads[chooseRoad(random)];
-        const Lane& lane = chooseLane(random) == 0 ? road.getRightLane() : road.getLeftLane();
+        const std::vector<Lane>& lanes = chooseDirection(random) == 0
+            ? road.getRightLanes()
+            : road.getLeftLanes();
+        std::uniform_int_distribution<std::size_t> chooseLane(0, lanes.size() - 1);
+        const Lane& lane = lanes[chooseLane(random)];
         const std::vector<Vector2>& waypoints = lane.getWaypoints();
         if (waypoints.empty()) {
             continue;

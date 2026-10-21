@@ -25,6 +25,26 @@ constexpr float SIDEWALK_JOINT_WIDTH = 3.0f;
 constexpr float CURB_WIDTH = 5.0f;
 constexpr float SIDEWALK_INTERSECTION_CLIP_DISTANCE = 22.0f;
 constexpr float SIDEWALK_ROAD_CLEARANCE = 20.0f;
+constexpr float LANE_MARK_DASH_LENGTH = 55.0f;
+constexpr float LANE_MARK_DASH_GAP = 45.0f;
+constexpr Color LANE_MARKING_COLOR = { 220, 220, 210, 255 };
+
+std::vector<float> vehicleLaneCenterOffsets(float roadWidth, std::size_t lanesPerDirection) {
+    if (lanesPerDirection <= 1) {
+        return { VEHICLE_LANE_CENTER_OFFSET };
+    }
+
+    const float usableHalfWidth = std::max(0.0f, roadWidth * 0.5f - BIKE_LANE_WIDTH);
+    const float laneWidth = usableHalfWidth / static_cast<float>(lanesPerDirection);
+    std::vector<float> offsets;
+    offsets.reserve(lanesPerDirection);
+    for (std::size_t index = 0; index < lanesPerDirection; ++index) {
+        offsets.push_back(
+            usableHalfWidth - laneWidth * (static_cast<float>(index) + 0.5f)
+        );
+    }
+    return offsets;
+}
 
 Vector2 add(Vector2 first, Vector2 second) {
     return { first.x + second.x, first.y + second.y };
@@ -206,17 +226,66 @@ void drawOffsetMarking(
         }
     }
 }
+
+void drawDashedLaneMarking(
+    const std::vector<Vector2>& points,
+    const std::vector<Intersection>& intersections,
+    Color color,
+    float thickness
+) {
+    const float dashPeriod = LANE_MARK_DASH_LENGTH + LANE_MARK_DASH_GAP;
+    float distanceAlongLine = 0.0f;
+    for (std::size_t index = 1; index < points.size(); ++index) {
+        const Vector2 start = points[index - 1];
+        const Vector2 end = points[index];
+        const float segmentLength = Vector2Distance(start, end);
+        if (segmentLength <= 0.0001f) {
+            continue;
+        }
+
+        float localDistance = 0.0f;
+        while (localDistance < segmentLength) {
+            const float phase = std::fmod(distanceAlongLine + localDistance, dashPeriod);
+            const bool insideDash = phase < LANE_MARK_DASH_LENGTH;
+            const float distanceToBoundary = insideDash
+                ? LANE_MARK_DASH_LENGTH - phase
+                : dashPeriod - phase;
+            const float pieceLength = std::min(segmentLength - localDistance, distanceToBoundary);
+            if (insideDash && pieceLength > 0.0001f) {
+                const Vector2 pieceStart = interpolate(start, end, localDistance / segmentLength);
+                const Vector2 pieceEnd = interpolate(
+                    start,
+                    end,
+                    (localDistance + pieceLength) / segmentLength
+                );
+                if (!isInsideIntersection(interpolate(pieceStart, pieceEnd, 0.5f), intersections)) {
+                    DrawLineEx(pieceStart, pieceEnd, thickness, color);
+                }
+            }
+            localDistance += std::max(pieceLength, 0.0001f);
+        }
+        distanceAlongLine += segmentLength;
+    }
+}
 }
 
-Road::Road(float centerX, float centerY, float heading, float width, float length)
-    : Road(makeStraightCenterline(centerX, centerY, heading, length), width) {}
+Road::Road(
+    float centerX,
+    float centerY,
+    float heading,
+    float roadWidth,
+    float length,
+    std::size_t laneCount
+)
+    : Road(makeStraightCenterline(centerX, centerY, heading, length), roadWidth, laneCount) {}
 
-Road::Road(std::vector<Vector2> points, float roadWidth)
+Road::Road(std::vector<Vector2> points, float roadWidth, std::size_t laneCount)
     : centerline(std::move(points)),
       width(roadWidth),
+      lanesPerDirection(std::max<std::size_t>(1, laneCount)),
       pavedBounds(pavedBoundsFor(centerline, width)),
-      rightLane(makeLaneWaypoints(centerline, VEHICLE_LANE_CENTER_OFFSET, false)),
-      leftLane(makeLaneWaypoints(centerline, -VEHICLE_LANE_CENTER_OFFSET, true)),
+      rightLanes(makeDirectionalLanes(centerline, width, lanesPerDirection, false)),
+      leftLanes(makeDirectionalLanes(centerline, width, lanesPerDirection, true)),
       rightBikeLane(makeLaneWaypoints(centerline, width * 0.5f - BIKE_LANE_WIDTH * 0.5f, false)),
       leftBikeLane(makeLaneWaypoints(centerline, -width * 0.5f + BIKE_LANE_WIDTH * 0.5f, true)),
       rightSidewalk(makeLaneWaypoints(centerline, width * 0.5f + SIDEWALK_WIDTH * 0.5f, false)),
@@ -262,6 +331,23 @@ void Road::Draw(
         negativeEdge, intersections, BIKE_LANE_MARKING, 4.0f
     );
 
+    const std::vector<float> laneOffsets = vehicleLaneCenterOffsets(width, lanesPerDirection);
+    for (std::size_t index = 1; index < laneOffsets.size(); ++index) {
+        const float dividerOffset = (laneOffsets[index - 1] + laneOffsets[index]) * 0.5f;
+        drawDashedLaneMarking(
+            offsetPolyline(centerline, dividerOffset),
+            intersections,
+            LANE_MARKING_COLOR,
+            4.0f
+        );
+        drawDashedLaneMarking(
+            offsetPolyline(centerline, -dividerOffset),
+            intersections,
+            LANE_MARKING_COLOR,
+            4.0f
+        );
+    }
+
     const float dashPeriod = DASH_LENGTH + DASH_GAP;
     float distanceAlongRoad = 0.0f;
 
@@ -303,10 +389,14 @@ void Road::Draw(
     }
 }
 
-Lane& Road::getRightLane() { return rightLane; }
-const Lane& Road::getRightLane() const { return rightLane; }
-Lane& Road::getLeftLane() { return leftLane; }
-const Lane& Road::getLeftLane() const { return leftLane; }
+Lane& Road::getRightLane() { return rightLanes.front(); }
+const Lane& Road::getRightLane() const { return rightLanes.front(); }
+Lane& Road::getLeftLane() { return leftLanes.front(); }
+const Lane& Road::getLeftLane() const { return leftLanes.front(); }
+std::vector<Lane>& Road::getRightLanes() { return rightLanes; }
+const std::vector<Lane>& Road::getRightLanes() const { return rightLanes; }
+std::vector<Lane>& Road::getLeftLanes() { return leftLanes; }
+const std::vector<Lane>& Road::getLeftLanes() const { return leftLanes; }
 
 float Road::getWidth() const {
     return width;
@@ -407,4 +497,19 @@ std::vector<Vector2> Road::makeLaneWaypoints(
         std::reverse(lanePoints.begin(), lanePoints.end());
     }
     return lanePoints;
+}
+
+std::vector<Lane> Road::makeDirectionalLanes(
+    const std::vector<Vector2>& points,
+    float roadWidth,
+    std::size_t laneCount,
+    bool reverse
+) {
+    const std::vector<float> offsets = vehicleLaneCenterOffsets(roadWidth, laneCount);
+    std::vector<Lane> lanes;
+    lanes.reserve(offsets.size());
+    for (const float offset : offsets) {
+        lanes.emplace_back(makeLaneWaypoints(points, reverse ? -offset : offset, reverse));
+    }
+    return lanes;
 }

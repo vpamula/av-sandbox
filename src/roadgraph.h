@@ -8,6 +8,7 @@
 #include <vector>
 
 class Lane;
+class Intersection;
 class Road;
 
 struct RoadGraphNode {
@@ -19,12 +20,17 @@ struct RoadGraphEdge {
     int startNode = -1;
     int endNode = -1;
     std::vector<Vector2> points;
+    float routingPenalty = 0.0f;
 };
 
 class RoadGraph {
 public:
-    void addRoad(const Road& road);
-    void addLaneTransition(const Lane* incomingLane, const Lane* outgoingLane, Rectangle junctionBounds);
+    void addRoad(const Road& road, const std::vector<Intersection>& intersections);
+    void addLaneTransition(
+        const Lane* incomingLane,
+        const Lane* outgoingLane,
+        const Intersection& intersection
+    );
     std::optional<Vector2> snapPointToRoad(Vector2 worldPoint, float maxDistance = 150.0f) const;
     std::vector<Vector2> findRoute(Vector2 start, Vector2 end) const;
 
@@ -53,7 +59,8 @@ private:
         Vector2 exitPoint,
         Vector2 incomingDirection,
         Vector2 outgoingDirection,
-        int samples = 18
+        int samples = 18,
+        float handleRatio = 0.5f
     );
     static float distanceToRectangle(Vector2 point, Rectangle rect);
 
