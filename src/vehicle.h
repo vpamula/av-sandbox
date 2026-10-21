@@ -14,6 +14,7 @@ public:
         float maximumSpeed = std::numeric_limits<float>::infinity()
     );
     void Draw() const;
+    void DrawEgo() const;
     void Draw(Color bodyColor) const;
 
     float getX() const { return x; }
@@ -26,6 +27,7 @@ public:
     void setSteeringAngle(float angle) { steeringAngle = angle; }
     void setSpeed(float newSpeed) { speed = newSpeed; }
     void setHeading(float newHeading) { heading = newHeading; }
+    void setPosition(Vector2 position) { x = position.x; y = position.y; }
     void approachSpeed(float targetSpeed, float acceleration, float deceleration, float dt);
 
 private:

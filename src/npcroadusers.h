@@ -23,8 +23,10 @@ public:
         std::size_t pedestrianCount
     );
 
-    void prepareForStep(float dt);
+    void prepareForStep(const std::vector<Vehicle*>& crossingTraffic, float dt);
+    void constrainPedestriansToRoutes();
     std::vector<Vehicle*> getVehicles();
+    std::vector<Vehicle*> getBicycleVehicles();
     void Draw() const;
     std::size_t bicycleCount() const;
     std::size_t pedestrianCount() const;
@@ -45,6 +47,9 @@ private:
         RoadUserType type;
         Color color;
         bool usesCrosswalk;
+        bool active = true;
+        bool crossingCommitted = false;
+        std::size_t routeSegment = 0;
         float turnaroundPause = 0.0f;
     };
 

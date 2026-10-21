@@ -48,8 +48,8 @@ Vector2 directionAt(const Road& road, Vector2 point) {
     return closestDirection;
 }
 
-bool pointIsNearRoadCorridor(Vector2 point, const Road& road) {
-    const float corridorHalfWidth = road.getWidth() * 0.5f + SIDEWALK_VISIBILITY_MARGIN;
+bool pointIsNearRoadCorridor(Vector2 point, const Road& road, float margin) {
+    const float corridorHalfWidth = road.getWidth() * 0.5f + margin;
     const float corridorDistanceSquared = corridorHalfWidth * corridorHalfWidth;
     const std::vector<Vector2>& centerline = road.getCenterline();
 
@@ -149,32 +149,43 @@ std::optional<Vector2> findNearestBoundaryCrossing(
     return closest;
 }
 
-std::vector<Vector2> makeTangentIntersectionSurface(Vector2 center, const Road& first, const Road& second) {
+std::optional<Vector2> makeTangentIntersectionPoint(
+    Vector2 center,
+    const Road& first,
+    const Road& second,
+    float firstOffset,
+    float secondOffset
+) {
     const Vector2 firstDirection = directionAt(first, center);
     const Vector2 secondDirection = directionAt(second, center);
     const Vector2 firstNormal = { -firstDirection.y, firstDirection.x };
     const Vector2 secondNormal = { -secondDirection.y, secondDirection.x };
     const float determinant = cross(firstNormal, secondNormal);
     if (std::abs(determinant) <= 0.0001f) {
+        return std::nullopt;
+    }
+
+    const Vector2 offset = {
+        (firstOffset * secondNormal.y - firstNormal.y * secondOffset) / determinant,
+        (firstNormal.x * secondOffset - firstOffset * secondNormal.x) / determinant
+    };
+    return Vector2Add(center, offset);
+}
+
+std::vector<Vector2> makeTangentIntersectionSurface(Vector2 center, const Road& first, const Road& second) {
+    const float firstHalfWidth = first.getWidth() * 0.5f;
+    const float secondHalfWidth = second.getWidth() * 0.5f;
+    const std::optional<Vector2> corners[] = {
+        makeTangentIntersectionPoint(center, first, second, -firstHalfWidth, -secondHalfWidth),
+        makeTangentIntersectionPoint(center, first, second, firstHalfWidth, -secondHalfWidth),
+        makeTangentIntersectionPoint(center, first, second, firstHalfWidth, secondHalfWidth),
+        makeTangentIntersectionPoint(center, first, second, -firstHalfWidth, secondHalfWidth)
+    };
+    if (std::any_of(std::begin(corners), std::end(corners), [](const auto& point) { return !point; })) {
         return {};
     }
 
-    auto corner = [&](float firstOffset, float secondOffset) {
-        const Vector2 offset = {
-            (firstOffset * secondNormal.y - firstNormal.y * secondOffset) / determinant,
-            (firstNormal.x * secondOffset - firstOffset * secondNormal.x) / determinant
-        };
-        return Vector2Add(center, offset);
-    };
-
-    const float firstHalfWidth = first.getWidth() * 0.5f;
-    const float secondHalfWidth = second.getWidth() * 0.5f;
-    return {
-        corner(-firstHalfWidth, -secondHalfWidth),
-        corner(firstHalfWidth, -secondHalfWidth),
-        corner(firstHalfWidth, secondHalfWidth),
-        corner(-firstHalfWidth, secondHalfWidth)
-    };
+    return { *corners[0], *corners[1], *corners[2], *corners[3] };
 }
 
 std::vector<Vector2> makeIntersectionSurface(Vector2 center, const Road& first, const Road& second) {
@@ -195,6 +206,110 @@ std::vector<Vector2> makeIntersectionSurface(Vector2 center, const Road& first, 
     }
 
     return { *negativeNegative, *positiveNegative, *positivePositive, *negativePositive };
+}
+
+std::vector<std::array<Vector2, 4>> makeSidewalkCorners(
+    Vector2 center,
+    const Road& first,
+    const Road& second
+) {
+    const float firstHalfWidth = first.getWidth() * 0.5f;
+    const float secondHalfWidth = second.getWidth() * 0.5f;
+    const std::vector<Vector2> firstInnerNegative = makeRoadEdge(first, -firstHalfWidth);
+    const std::vector<Vector2> firstInnerPositive = makeRoadEdge(first, firstHalfWidth);
+    const std::vector<Vector2> secondInnerNegative = makeRoadEdge(second, -secondHalfWidth);
+    const std::vector<Vector2> secondInnerPositive = makeRoadEdge(second, secondHalfWidth);
+    const std::vector<Vector2> firstOuterNegative = makeRoadEdge(
+        first,
+        -(firstHalfWidth + Road::SIDEWALK_WIDTH)
+    );
+    const std::vector<Vector2> firstOuterPositive = makeRoadEdge(
+        first,
+        firstHalfWidth + Road::SIDEWALK_WIDTH
+    );
+    const std::vector<Vector2> secondOuterNegative = makeRoadEdge(
+        second,
+        -(secondHalfWidth + Road::SIDEWALK_WIDTH)
+    );
+    const std::vector<Vector2> secondOuterPositive = makeRoadEdge(
+        second,
+        secondHalfWidth + Road::SIDEWALK_WIDTH
+    );
+
+    const std::vector<Vector2>* firstInner[] = { &firstInnerNegative, &firstInnerPositive };
+    const std::vector<Vector2>* firstOuter[] = { &firstOuterNegative, &firstOuterPositive };
+    const std::vector<Vector2>* secondInner[] = { &secondInnerNegative, &secondInnerPositive };
+    const std::vector<Vector2>* secondOuter[] = { &secondOuterNegative, &secondOuterPositive };
+    std::vector<std::array<Vector2, 4>> corners;
+
+    for (std::size_t firstSide = 0; firstSide < 2; ++firstSide) {
+        for (std::size_t secondSide = 0; secondSide < 2; ++secondSide) {
+            auto innerInner = findNearestBoundaryCrossing(
+                *firstInner[firstSide], *secondInner[secondSide], center
+            );
+            auto outerInner = findNearestBoundaryCrossing(
+                *firstOuter[firstSide], *secondInner[secondSide], center
+            );
+            auto outerOuter = findNearestBoundaryCrossing(
+                *firstOuter[firstSide], *secondOuter[secondSide], center
+            );
+            auto innerOuter = findNearestBoundaryCrossing(
+                *firstInner[firstSide], *secondOuter[secondSide], center
+            );
+            const float firstSign = firstSide == 0 ? -1.0f : 1.0f;
+            const float secondSign = secondSide == 0 ? -1.0f : 1.0f;
+            if (!innerInner) {
+                innerInner = makeTangentIntersectionPoint(
+                    center, first, second, firstSign * firstHalfWidth, secondSign * secondHalfWidth
+                );
+            }
+            if (!outerInner) {
+                outerInner = makeTangentIntersectionPoint(
+                    center,
+                    first,
+                    second,
+                    firstSign * (firstHalfWidth + Road::SIDEWALK_WIDTH),
+                    secondSign * secondHalfWidth
+                );
+            }
+            if (!outerOuter) {
+                outerOuter = makeTangentIntersectionPoint(
+                    center,
+                    first,
+                    second,
+                    firstSign * (firstHalfWidth + Road::SIDEWALK_WIDTH),
+                    secondSign * (secondHalfWidth + Road::SIDEWALK_WIDTH)
+                );
+            }
+            if (!innerOuter) {
+                innerOuter = makeTangentIntersectionPoint(
+                    center,
+                    first,
+                    second,
+                    firstSign * firstHalfWidth,
+                    secondSign * (secondHalfWidth + Road::SIDEWALK_WIDTH)
+                );
+            }
+            if (!innerInner || !outerInner || !outerOuter || !innerOuter) {
+                continue;
+            }
+
+            const std::array<Vector2, 4> corner = {
+                *innerInner, *outerInner, *outerOuter, *innerOuter
+            };
+            float twiceArea = 0.0f;
+            for (std::size_t index = 0; index < corner.size(); ++index) {
+                const Vector2 current = corner[index];
+                const Vector2 next = corner[(index + 1) % corner.size()];
+                twiceArea += current.x * next.y - next.x * current.y;
+            }
+            if (std::abs(twiceArea) > 8.0f) {
+                corners.push_back(corner);
+            }
+        }
+    }
+
+    return corners;
 }
 
 std::vector<Vector2> findCenterlineIntersections(const Road& first, const Road& second) {
@@ -299,13 +414,38 @@ std::optional<Vector2> World::findNearestRoadPoint(Vector2 worldPoint, float max
 }
 
 bool World::isPointInIntersection(Vector2 worldPoint) const {
+    return findIntersectionContaining(worldPoint).has_value();
+}
+
+bool World::isNearIntersection(Vector2 worldPoint, float distance) const {
     return std::any_of(
         intersections.begin(),
         intersections.end(),
         [&](const Intersection& intersection) {
-            return intersection.containsPoint(worldPoint);
+            return intersection.containsPointWithinDistance(worldPoint, distance);
         }
     );
+}
+
+std::optional<std::size_t> World::findIntersectionContaining(Vector2 worldPoint) const {
+    for (std::size_t index = 0; index < intersections.size(); ++index) {
+        if (intersections[index].containsPoint(worldPoint)) {
+            return index;
+        }
+    }
+    return std::nullopt;
+}
+
+std::size_t World::getIntersectionCount() const {
+    return intersections.size();
+}
+
+bool World::isIntersectionControlled(std::size_t intersectionIndex) const {
+    if (intersectionIndex >= intersections.size()) {
+        return false;
+    }
+    const Intersection& intersection = intersections[intersectionIndex];
+    return intersection.isStopControlled() || intersection.isTrafficLightControlled();
 }
 
 bool World::hasRoadCorridorLineOfSight(Vector2 from, Vector2 to) const {
@@ -320,7 +460,7 @@ bool World::hasRoadCorridorLineOfSight(Vector2 from, Vector2 to) const {
         const Vector2 point = Vector2Add(from, Vector2Scale(Vector2Subtract(to, from), amount));
         const bool visibleSurface = isPointInIntersection(point) ||
             std::any_of(roads.begin(), roads.end(), [&](const Road& road) {
-                return pointIsNearRoadCorridor(point, road);
+                return pointIsNearRoadCorridor(point, road, SIDEWALK_VISIBILITY_MARGIN);
             });
         if (!visibleSurface) {
             return false;
@@ -328,6 +468,12 @@ bool World::hasRoadCorridorLineOfSight(Vector2 from, Vector2 to) const {
     }
 
     return true;
+}
+
+bool World::isPointOnRoadSurface(Vector2 worldPoint, float margin) const {
+    return std::any_of(roads.begin(), roads.end(), [&](const Road& road) {
+        return pointIsNearRoadCorridor(worldPoint, road, margin);
+    });
 }
 
 std::vector<Vector2> World::buildRouteBetweenPoints(Vector2 start, Vector2 end) const {
@@ -341,7 +487,7 @@ std::vector<Vector2> World::buildRouteBetweenPoints(Vector2 start, Vector2 end) 
 }
 
 std::vector<std::vector<Vector2>> World::getPedestrianCrossings() const {
-    constexpr float SIDEWALK_EXTENSION = 36.0f;
+    constexpr float SIDEWALK_EXTENSION = Road::SIDEWALK_WIDTH * 0.5f;
     std::vector<std::vector<Vector2>> crossings;
     for (const Intersection& intersection : intersections) {
         std::vector<std::vector<Vector2>> junctionCrossings =
@@ -422,6 +568,9 @@ void World::computeIntersections() {
                     INTERSECTION_DRAW_SIZE,
                     INTERSECTION_DRAW_SIZE
                 }, std::move(surface));
+                intersection.setSidewalkCorners(
+                    makeSidewalkCorners(center, roads[firstRoad], roads[secondRoad])
+                );
                 intersection.addLane(&roads[firstRoad].getRightLane());
                 intersection.addLane(&roads[firstRoad].getLeftLane());
                 intersection.addLane(&roads[secondRoad].getRightLane());
@@ -464,8 +613,8 @@ void World::computeIntersections() {
         }
         std::random_device seedSource;
         std::mt19937 random(seedSource());
-        constexpr std::size_t ADDITIONAL_TRAFFIC_LIGHTS = 3;
-        constexpr std::size_t ADDITIONAL_STOP_SIGNS = 2;
+        constexpr std::size_t ADDITIONAL_TRAFFIC_LIGHTS = 5;
+        constexpr std::size_t ADDITIONAL_STOP_SIGNS = 4;
         std::uniform_real_distribution<float> chooseSignalPhase(0.0f, 22.0f);
 
         auto centerOf = [&](std::size_t index) {
@@ -550,17 +699,22 @@ void World::computeIntersections() {
         );
         while (selectedIndices.size() < targetCount) {
             std::vector<std::size_t> eligible;
-            for (const std::size_t candidate : candidates) {
-                const int row = rowForIntersection[candidate];
-                const int column = columnForIntersection[candidate];
-                const bool rowOccupied = std::find(occupiedRows.begin(), occupiedRows.end(), row) != occupiedRows.end();
-                const bool columnOccupied = std::find(occupiedColumns.begin(), occupiedColumns.end(), column) != occupiedColumns.end();
-                if (!rowOccupied && !columnOccupied) {
-                    eligible.push_back(candidate);
+            // Keep the first five added controls on distinct rows and columns
+            // alongside the central stop sign. Further controls fill the map
+            // after all unique row/column slots have been used.
+            if (selectedIndices.size() < 5) {
+                for (const std::size_t candidate : candidates) {
+                    const int row = rowForIntersection[candidate];
+                    const int column = columnForIntersection[candidate];
+                    const bool rowOccupied = std::find(occupiedRows.begin(), occupiedRows.end(), row) != occupiedRows.end();
+                    const bool columnOccupied = std::find(occupiedColumns.begin(), occupiedColumns.end(), column) != occupiedColumns.end();
+                    if (!rowOccupied && !columnOccupied) {
+                        eligible.push_back(candidate);
+                    }
                 }
             }
             if (eligible.empty()) {
-                break;
+                eligible = candidates;
             }
 
             const std::size_t selected = selectFarthestCandidate(eligible);
@@ -570,8 +724,7 @@ void World::computeIntersections() {
             candidates.erase(std::find(candidates.begin(), candidates.end(), selected));
         }
 
-        // There are six rows and columns, so the central stop plus five
-        // additional controls fills unique row/column slots without overlap.
+        // Randomize control types across the selected, map-wide locations.
         std::shuffle(selectedIndices.begin(), selectedIndices.end(), random);
         const std::size_t trafficLightCount = std::min(ADDITIONAL_TRAFFIC_LIGHTS, selectedIndices.size());
         for (std::size_t index = 0; index < selectedIndices.size(); ++index) {
@@ -608,7 +761,7 @@ void World::rebuildGraph() {
 
 void World::Draw() const {
     for (const Road& road : roads) {
-        road.Draw(intersections);
+        road.Draw(intersections, roads);
     }
 
     for (const Intersection& intersection : intersections) {

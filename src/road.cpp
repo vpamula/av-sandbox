@@ -13,7 +13,6 @@ constexpr float DASH_GAP = 60.0f;
 constexpr float DASH_WIDTH = 6.0f;
 constexpr float VEHICLE_LANE_CENTER_OFFSET = 40.0f;
 constexpr float BIKE_LANE_WIDTH = 30.0f;
-constexpr float SIDEWALK_WIDTH = 30.0f;
 constexpr float MARKING_SAMPLE_SPACING = 20.0f;
 constexpr Color BIKE_LANE_COLOR = { 46, 79, 76, 255 };
 constexpr Color BIKE_LANE_MARKING = { 125, 190, 178, 255 };
@@ -24,6 +23,8 @@ constexpr Color CURB_COLOR = { 211, 207, 193, 255 };
 constexpr std::size_t SIDEWALK_SLAB_SEGMENTS = 4;
 constexpr float SIDEWALK_JOINT_WIDTH = 3.0f;
 constexpr float CURB_WIDTH = 5.0f;
+constexpr float SIDEWALK_INTERSECTION_CLIP_DISTANCE = 22.0f;
+constexpr float SIDEWALK_ROAD_CLEARANCE = 20.0f;
 
 Vector2 add(Vector2 first, Vector2 second) {
     return { first.x + second.x, first.y + second.y };
@@ -37,6 +38,38 @@ Vector2 interpolate(Vector2 start, Vector2 end, float amount) {
     return add(start, scale(Vector2Subtract(end, start), amount));
 }
 
+Rectangle pavedBoundsFor(const std::vector<Vector2>& centerline, float roadWidth) {
+    if (centerline.empty()) {
+        return { 0.0f, 0.0f, 0.0f, 0.0f };
+    }
+
+    float minimumX = centerline.front().x;
+    float maximumX = centerline.front().x;
+    float minimumY = centerline.front().y;
+    float maximumY = centerline.front().y;
+    for (const Vector2 point : centerline) {
+        minimumX = std::min(minimumX, point.x);
+        maximumX = std::max(maximumX, point.x);
+        minimumY = std::min(minimumY, point.y);
+        maximumY = std::max(maximumY, point.y);
+    }
+
+    const float halfWidth = roadWidth * 0.5f;
+    return {
+        minimumX - halfWidth,
+        minimumY - halfWidth,
+        maximumX - minimumX + roadWidth,
+        maximumY - minimumY + roadWidth
+    };
+}
+
+bool containsWithMargin(Rectangle bounds, Vector2 point, float margin) {
+    return point.x >= bounds.x - margin &&
+        point.x <= bounds.x + bounds.width + margin &&
+        point.y >= bounds.y - margin &&
+        point.y <= bounds.y + bounds.height + margin;
+}
+
 bool isInsideIntersection(Vector2 point, const std::vector<Intersection>& intersections) {
     return std::any_of(
         intersections.begin(),
@@ -45,6 +78,54 @@ bool isInsideIntersection(Vector2 point, const std::vector<Intersection>& inters
             return intersection.containsPoint(point);
         }
     );
+}
+
+bool isNearIntersection(Vector2 point, const std::vector<Intersection>& intersections, float distance) {
+    return std::any_of(
+        intersections.begin(),
+        intersections.end(),
+        [&](const Intersection& intersection) {
+            return intersection.containsPointWithinDistance(point, distance);
+        }
+    );
+}
+
+bool overlapsAnotherRoad(
+    Vector2 point,
+    const Road& currentRoad,
+    const std::vector<Road>& roads
+) {
+    for (const Road& otherRoad : roads) {
+        if (&otherRoad == &currentRoad) {
+            continue;
+        }
+
+        if (!containsWithMargin(otherRoad.getPavedBounds(), point, SIDEWALK_ROAD_CLEARANCE)) {
+            continue;
+        }
+
+        const std::vector<Vector2>& centerline = otherRoad.getCenterline();
+        const float corridorRadius = otherRoad.getWidth() * 0.5f + SIDEWALK_ROAD_CLEARANCE;
+        const float corridorRadiusSquared = corridorRadius * corridorRadius;
+        for (std::size_t index = 1; index < centerline.size(); ++index) {
+            const Vector2 start = centerline[index - 1];
+            const Vector2 segment = Vector2Subtract(centerline[index], start);
+            const float segmentLengthSquared = Vector2LengthSqr(segment);
+            const float projection = segmentLengthSquared <= 0.0001f
+                ? 0.0f
+                : std::clamp(
+                    Vector2DotProduct(Vector2Subtract(point, start), segment) / segmentLengthSquared,
+                    0.0f,
+                    1.0f
+                );
+            const Vector2 closestPoint = Vector2Add(start, Vector2Scale(segment, projection));
+            if (Vector2LengthSqr(Vector2Subtract(point, closestPoint)) <= corridorRadiusSquared) {
+                return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 void drawFrontFacingTriangle(Vector2 first, Vector2 second, Vector2 third, Color color) {
@@ -69,17 +150,34 @@ void drawStrip(const std::vector<Vector2>& firstEdge, const std::vector<Vector2>
 void drawSidewalk(
     const std::vector<Vector2>& innerEdge,
     const std::vector<Vector2>& outerEdge,
+    const Road& currentRoad,
+    const std::vector<Road>& roads,
     const std::vector<Intersection>& intersections
 ) {
     for (std::size_t index = 1; index < innerEdge.size(); ++index) {
-        const std::size_t slabIndex = (index - 1) / SIDEWALK_SLAB_SEGMENTS;
-        const Color slabColor = slabIndex % 2 == 0 ? SIDEWALK_COLOR : SIDEWALK_ALT_COLOR;
-        drawFrontFacingTriangle(innerEdge[index - 1], innerEdge[index], outerEdge[index], slabColor);
-        drawFrontFacingTriangle(innerEdge[index - 1], outerEdge[index], outerEdge[index - 1], slabColor);
+        const Vector2 slabCenter = Vector2Scale(
+            Vector2Add(
+                Vector2Add(innerEdge[index - 1], innerEdge[index]),
+                Vector2Add(outerEdge[index - 1], outerEdge[index])
+            ),
+            0.25f
+        );
+        const bool overlapsIntersection = isNearIntersection(
+            slabCenter,
+            intersections,
+            SIDEWALK_INTERSECTION_CLIP_DISTANCE
+        );
+        if (!overlapsIntersection && !overlapsAnotherRoad(slabCenter, currentRoad, roads)) {
+            const std::size_t slabIndex = (index - 1) / SIDEWALK_SLAB_SEGMENTS;
+            const Color slabColor = slabIndex % 2 == 0 ? SIDEWALK_COLOR : SIDEWALK_ALT_COLOR;
+            drawFrontFacingTriangle(innerEdge[index - 1], innerEdge[index], outerEdge[index], slabColor);
+            drawFrontFacingTriangle(innerEdge[index - 1], outerEdge[index], outerEdge[index - 1], slabColor);
+        }
 
         if (index % SIDEWALK_SLAB_SEGMENTS == 0) {
             const Vector2 jointCenter = Vector2Scale(Vector2Add(innerEdge[index], outerEdge[index]), 0.5f);
-            if (!isInsideIntersection(jointCenter, intersections)) {
+            if (!isNearIntersection(jointCenter, intersections, SIDEWALK_INTERSECTION_CLIP_DISTANCE) &&
+                !overlapsAnotherRoad(jointCenter, currentRoad, roads)) {
                 DrawLineEx(innerEdge[index], outerEdge[index], SIDEWALK_JOINT_WIDTH, SIDEWALK_JOINT_COLOR);
             }
         }
@@ -116,6 +214,7 @@ Road::Road(float centerX, float centerY, float heading, float width, float lengt
 Road::Road(std::vector<Vector2> points, float roadWidth)
     : centerline(std::move(points)),
       width(roadWidth),
+      pavedBounds(pavedBoundsFor(centerline, width)),
       rightLane(makeLaneWaypoints(centerline, VEHICLE_LANE_CENTER_OFFSET, false)),
       leftLane(makeLaneWaypoints(centerline, -VEHICLE_LANE_CENTER_OFFSET, true)),
       rightBikeLane(makeLaneWaypoints(centerline, width * 0.5f - BIKE_LANE_WIDTH * 0.5f, false)),
@@ -123,7 +222,10 @@ Road::Road(std::vector<Vector2> points, float roadWidth)
       rightSidewalk(makeLaneWaypoints(centerline, width * 0.5f + SIDEWALK_WIDTH * 0.5f, false)),
       leftSidewalk(makeLaneWaypoints(centerline, -width * 0.5f - SIDEWALK_WIDTH * 0.5f, true)) {}
 
-void Road::Draw(const std::vector<Intersection>& intersections) const {
+void Road::Draw(
+    const std::vector<Intersection>& intersections,
+    const std::vector<Road>& roads
+) const {
     const std::vector<Vector2> positiveEdge = offsetPolyline(centerline, width * 0.5f);
     const std::vector<Vector2> negativeEdge = offsetPolyline(centerline, -width * 0.5f);
     drawStrip(positiveEdge, negativeEdge, DARKGRAY);
@@ -142,8 +244,8 @@ void Road::Draw(const std::vector<Intersection>& intersections) const {
         centerline,
         -width * 0.5f - SIDEWALK_WIDTH
     );
-    drawSidewalk(positiveEdge, rightSidewalkOuterEdge, intersections);
-    drawSidewalk(negativeEdge, leftSidewalkOuterEdge, intersections);
+    drawSidewalk(positiveEdge, rightSidewalkOuterEdge, *this, roads, intersections);
+    drawSidewalk(negativeEdge, leftSidewalkOuterEdge, *this, roads, intersections);
     drawOffsetMarking(positiveEdge, intersections, CURB_COLOR, CURB_WIDTH);
     drawOffsetMarking(negativeEdge, intersections, CURB_COLOR, CURB_WIDTH);
 
@@ -208,6 +310,10 @@ const Lane& Road::getLeftLane() const { return leftLane; }
 
 float Road::getWidth() const {
     return width;
+}
+
+Rectangle Road::getPavedBounds() const {
+    return pavedBounds;
 }
 
 const std::vector<Vector2>& Road::getCenterline() const {

@@ -51,12 +51,39 @@ int main()
     bool panningCamera = false;
     bool leftDragPan = false;
     Vector2 leftDragStart = {0.0f, 0.0f};
-    Vector2 startRoutePoint = {0.0f, 0.0f};
-    Vector2 startRouteClickPoint = {0.0f, 0.0f};
+    std::vector<Vector2> selectedRoutePoints;
     std::vector<Vector2> routeToSelectedStart;
     std::vector<Vector2> routeFromSelectedStart;
     bool drivingToSelectedStart = false;
     bool routeCompleted = false;
+
+    auto buildRouteThroughPoints = [&world](const std::vector<Vector2>& points) {
+        std::vector<Vector2> route;
+        if (points.size() < 2) {
+            return route;
+        }
+
+        for (std::size_t index = 1; index < points.size(); ++index) {
+            std::vector<Vector2> segment = world.buildRouteBetweenPoints(
+                points[index - 1],
+                points[index]
+            );
+            if (segment.empty()) {
+                return std::vector<Vector2>{};
+            }
+
+            std::size_t firstPoint = 0;
+            if (!route.empty() && Vector2Distance(route.back(), segment.front()) <= 1.0f) {
+                firstPoint = 1;
+            }
+            route.insert(
+                route.end(),
+                segment.begin() + static_cast<std::ptrdiff_t>(firstPoint),
+                segment.end()
+            );
+        }
+        return route;
+    };
 
     auto updatePerception = [&]() {
         const std::vector<Vehicle*> trafficVehicles = npcTraffic.getVehicles();
@@ -111,11 +138,11 @@ int main()
 
         if (IsKeyPressed(KEY_R)) {
             routeSelected = false;
+            selectedRoutePoints.clear();
             routeToSelectedStart.clear();
             routeFromSelectedStart.clear();
             drivingToSelectedStart = false;
             routeCompleted = false;
-            startRouteClickPoint = {0.0f, 0.0f};
             controller.setRouteControls({});
             autonomousMode = true;
         }
@@ -156,56 +183,55 @@ int main()
             auto snappedPoint = world.findNearestRoadPoint(mouseWorld, 200.0f);
 
             if (snappedPoint.has_value()) {
-                if (!routeSelected) {
-                    startRoutePoint = snappedPoint.value();
-                    startRouteClickPoint = mouseWorld;
+                if (selectedRoutePoints.empty()) {
+                    selectedRoutePoints.push_back(snappedPoint.value());
                     routeSelected = true;
                     routeToSelectedStart.clear();
                     routeFromSelectedStart.clear();
                     drivingToSelectedStart = false;
                     routeCompleted = false;
+                    controller.setRouteControls({});
                 }
                 else {
-                    const Vector2 endRoutePoint = mouseWorld;
-                    const Vector2 vehiclePosition = { vehicle.getX(), vehicle.getY() };
-                    routeFromSelectedStart = world.buildRouteBetweenPoints(
-                        startRouteClickPoint,
-                        endRoutePoint
-                    );
-                    if (!routeFromSelectedStart.empty()) {
-                        startRoutePoint = routeFromSelectedStart.front();
-                        routeToSelectedStart = world.buildRouteBetweenPoints(vehiclePosition, startRoutePoint);
-                    }
+                    std::vector<Vector2> candidatePoints = selectedRoutePoints;
+                    candidatePoints.push_back(snappedPoint.value());
+                    std::vector<Vector2> candidateRoute = buildRouteThroughPoints(candidatePoints);
+                    if (!candidateRoute.empty()) {
+                        const bool creatingFirstSegment = selectedRoutePoints.size() == 1;
+                        selectedRoutePoints = std::move(candidatePoints);
+                        routeFromSelectedStart = std::move(candidateRoute);
 
-                    if (!routeToSelectedStart.empty() && !routeFromSelectedStart.empty()) {
-                        // The graph route starts at its nearest lane node. Keep
-                        // the vehicle's exact current position as the visible
-                        // and followed start of the approach leg.
-                        if (Vector2Distance(vehiclePosition, routeToSelectedStart.front()) > 1.0f) {
-                            routeToSelectedStart.insert(routeToSelectedStart.begin(), vehiclePosition);
+                        if (creatingFirstSegment) {
+                            const Vector2 vehiclePosition = { vehicle.getX(), vehicle.getY() };
+                            routeToSelectedStart = world.buildRouteBetweenPoints(
+                                vehiclePosition,
+                                routeFromSelectedStart.front()
+                            );
+                            if (routeToSelectedStart.empty()) {
+                                routeToSelectedStart.push_back(vehiclePosition);
+                            }
+                            // Keep the vehicle's exact current position as the
+                            // visible and followed start of the approach leg.
+                            else if (Vector2Distance(vehiclePosition, routeToSelectedStart.front()) > 1.0f) {
+                                routeToSelectedStart.insert(routeToSelectedStart.begin(), vehiclePosition);
+                            }
+                            routeSelected = false;
+                            drivingToSelectedStart =
+                                Vector2Distance(vehiclePosition, routeFromSelectedStart.front()) > 60.0f;
                         }
 
-                        drivingToSelectedStart = Vector2Distance(vehiclePosition, startRoutePoint) > 60.0f;
-                        routeCompleted = false;
-                        const std::vector<Vector2>& activeRoute = drivingToSelectedStart
-                            ? routeToSelectedStart
-                            : routeFromSelectedStart;
-                        controller.setRouteControls(
-                            world.getRouteControlsAlongRoute(activeRoute, vehicle.getLength())
-                        );
-                        controller.reacquireWaypoint(vehicle, activeRoute);
-                        autonomousMode = true;
+                        if (!routeToSelectedStart.empty()) {
+                            routeCompleted = false;
+                            const std::vector<Vector2>& activeRoute = drivingToSelectedStart
+                                ? routeToSelectedStart
+                                : routeFromSelectedStart;
+                            controller.setRouteControls(
+                                world.getRouteControlsAlongRoute(activeRoute, vehicle.getLength())
+                            );
+                            controller.reacquireWaypoint(vehicle, activeRoute);
+                            autonomousMode = true;
+                        }
                     }
-                    else {
-                        routeToSelectedStart.clear();
-                        routeFromSelectedStart.clear();
-                        drivingToSelectedStart = false;
-                        routeCompleted = false;
-                    }
-
-                    routeSelected = false;
-                    startRoutePoint = {0.0f, 0.0f};
-                    startRouteClickPoint = {0.0f, 0.0f};
                 }
             }
 
@@ -302,19 +328,37 @@ int main()
             }
 
             npcTraffic.prepareForStep(world, vehicle, dt);
-            npcRoadUsers.prepareForStep(dt);
+            std::vector<Vehicle*> crossingTraffic = { &vehicle };
+            std::vector<Vehicle*> crossingNpcCars = npcTraffic.getVehicles();
+            crossingTraffic.insert(
+                crossingTraffic.end(),
+                crossingNpcCars.begin(),
+                crossingNpcCars.end()
+            );
+            std::vector<Vehicle*> crossingBicycles = npcRoadUsers.getBicycleVehicles();
+            crossingTraffic.insert(
+                crossingTraffic.end(),
+                crossingBicycles.begin(),
+                crossingBicycles.end()
+            );
+            npcRoadUsers.prepareForStep(crossingTraffic, dt);
             std::vector<Vehicle*> vehicles = { &vehicle };
             std::vector<Vehicle*> npcVehicles = npcTraffic.getVehicles();
             vehicles.insert(vehicles.end(), npcVehicles.begin(), npcVehicles.end());
             const std::size_t roadUserPriorityStart = vehicles.size();
             std::vector<Vehicle*> roadUserVehicles = npcRoadUsers.getVehicles();
+            const std::size_t pedestrianPriorityStart =
+                roadUserPriorityStart + npcRoadUsers.bicycleCount();
             vehicles.insert(vehicles.end(), roadUserVehicles.begin(), roadUserVehicles.end());
             trafficSafety.step(
+                world,
                 vehicles,
                 !autonomousMode && !routeCompleted,
                 dt,
-                roadUserPriorityStart
+                roadUserPriorityStart,
+                pedestrianPriorityStart
             );
+            npcRoadUsers.constrainPedestriansToRoutes();
         }
         else {
             vehicle.setSpeed(0.0f);
@@ -326,7 +370,7 @@ int main()
         world.Draw();
 
         if (routeSelected) {
-            DrawCircleV(startRoutePoint, 12.0f, GREEN);
+            DrawCircleV(selectedRoutePoints.front(), 12.0f, GREEN);
         }
 
         if (!routeToSelectedStart.empty() && !routeFromSelectedStart.empty()) {
@@ -339,13 +383,18 @@ int main()
 
             DrawCircleV(routeToSelectedStart.front(), 8.0f, SKYBLUE);
             DrawCircleV(routeToSelectedStart.back(), 10.0f, GREEN);
-            DrawCircleV(routeFromSelectedStart.back(), 10.0f, RED);
+            for (std::size_t index = 0; index < selectedRoutePoints.size(); ++index) {
+                const Color pointColor = index == 0
+                    ? GREEN
+                    : (index + 1 == selectedRoutePoints.size() ? RED : ORANGE);
+                DrawCircleV(selectedRoutePoints[index], 10.0f, pointColor);
+            }
         }
 
         npcTraffic.Draw();
         npcRoadUsers.Draw();
         perception.Draw(vehicle);
-        vehicle.Draw();
+        vehicle.DrawEgo();
         EndMode2D();
 
         DrawText("AV Sandbox", 20, 20, 30, WHITE);
@@ -386,8 +435,9 @@ int main()
             18,
             WHITE
         );
-        DrawText("BLUE: current position to start click", 20, 245, 18, SKYBLUE);
-        DrawText("YELLOW: start click to destination click", 20, 270, 18, YELLOW);
+        DrawText("BLUE: current position to first route point", 20, 245, 18, SKYBLUE);
+        DrawText("YELLOW: route through selected points in order", 20, 270, 18, YELLOW);
+        DrawText("EGO: WHITE BODY + MAGENTA STRIPE", 20, 320, 18, { 255, 35, 190, 255 });
         DrawText(
             TextFormat("PERCEPTION: %i OBJECTS", static_cast<int>(perception.getObjects().size())),
             20,
@@ -399,12 +449,11 @@ int main()
         const int bottomLeftX = 20;
         const int bottomLeftY = SCREEN_HEIGHT - 150;
 
-        DrawText("LEFT CLICK = set start point", bottomLeftX, bottomLeftY, 20, WHITE);
-        DrawText("SECOND LEFT CLICK = set end point", bottomLeftX, bottomLeftY + 30, 20, WHITE);
+        DrawText("LEFT CLICK = add a route point (keep clicking to extend)", bottomLeftX, bottomLeftY, 20, WHITE);
+        DrawText("R resets the route before starting a new one", bottomLeftX, bottomLeftY + 30, 20, WHITE);
         DrawText("RIGHT / MIDDLE DRAG pans; LEFT DRAG also pans", bottomLeftX, bottomLeftY + 60, 20, WHITE);
         DrawText("SPACE toggles pause", bottomLeftX, bottomLeftY + 90, 20, WHITE);
         DrawText("MOUSE WHEEL or +/- zooms camera", bottomLeftX, bottomLeftY + 120, 20, WHITE);
-        DrawText("R resets route", bottomLeftX, bottomLeftY + 150, 20, WHITE);
         EndDrawing();
     }
 

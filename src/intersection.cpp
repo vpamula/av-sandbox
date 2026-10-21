@@ -18,6 +18,41 @@ constexpr int CROSSWALK_STRIPE_COUNT = 4;
 constexpr float CROSSWALK_FIRST_STRIPE_OFFSET = 8.0f;
 constexpr float CROSSWALK_STRIPE_SPACING = 12.0f;
 constexpr float CROSSWALK_STRIPE_WIDTH = 5.0f;
+constexpr float INTERSECTION_SEAM_OVERDRAW = 8.0f;
+constexpr int SIDEWALK_CORNER_SLABS = 3;
+constexpr float SIDEWALK_CORNER_JOINT_WIDTH = 2.5f;
+constexpr Color SIDEWALK_CORNER_COLOR = { 174, 170, 157, 255 };
+constexpr Color SIDEWALK_CORNER_ALT_COLOR = { 164, 161, 150, 255 };
+constexpr Color SIDEWALK_CORNER_JOINT_COLOR = { 127, 127, 119, 220 };
+
+Vector2 bilinear(const std::array<Vector2, 4>& corners, float across, float along) {
+    const float nearStart = 1.0f - across;
+    const float farStart = 1.0f - along;
+    return Vector2Add(
+        Vector2Add(
+            Vector2Scale(corners[0], nearStart * farStart),
+            Vector2Scale(corners[1], across * farStart)
+        ),
+        Vector2Add(
+            Vector2Scale(corners[2], across * along),
+            Vector2Scale(corners[3], nearStart * along)
+        )
+    );
+}
+
+void drawSidewalkSlab(const std::array<Vector2, 4>& slab, Color color) {
+    auto drawFrontFacingTriangle = [color](Vector2 first, Vector2 second, Vector2 third) {
+        const float signedArea =
+            (second.x - first.x) * (third.y - first.y) -
+            (third.x - first.x) * (second.y - first.y);
+        if (signedArea > 0.0f) {
+            std::swap(second, third);
+        }
+        DrawTriangle(first, second, third, color);
+    };
+    drawFrontFacingTriangle(slab[0], slab[1], slab[2]);
+    drawFrontFacingTriangle(slab[0], slab[2], slab[3]);
+}
 
 void drawSignalLamp(Vector2 center, bool active, Color lit, Color glow, Color unlit) {
     if (active) {
@@ -33,6 +68,10 @@ Vector2 interpolate(Vector2 start, Vector2 end, float amount) {
 
 Intersection::Intersection(Rectangle bounds, std::vector<Vector2> surfacePolygon)
     : bounds(bounds), surfacePolygon(std::move(surfacePolygon)) {}
+
+void Intersection::setSidewalkCorners(std::vector<std::array<Vector2, 4>> corners) {
+    sidewalkCorners = std::move(corners);
+}
 
 Rectangle Intersection::getBounds() const { return bounds; }
 
@@ -61,9 +100,41 @@ bool Intersection::containsPoint(Vector2 point) const {
     return inside;
 }
 
+bool Intersection::containsPointWithinDistance(Vector2 point, float distance) const {
+    if (containsPoint(point)) {
+        return true;
+    }
+    if (distance <= 0.0f || surfacePolygon.size() < 2) {
+        return false;
+    }
+
+    const float maximumDistanceSquared = distance * distance;
+    for (std::size_t index = 0; index < surfacePolygon.size(); ++index) {
+        const Vector2 start = surfacePolygon[index];
+        const Vector2 segment = Vector2Subtract(
+            surfacePolygon[(index + 1) % surfacePolygon.size()],
+            start
+        );
+        const float segmentLengthSquared = Vector2LengthSqr(segment);
+        const float projection = segmentLengthSquared <= 0.0001f
+            ? 0.0f
+            : std::clamp(
+                Vector2DotProduct(Vector2Subtract(point, start), segment) / segmentLengthSquared,
+                0.0f,
+                1.0f
+            );
+        const Vector2 closestPoint = Vector2Add(start, Vector2Scale(segment, projection));
+        if (Vector2LengthSqr(Vector2Subtract(point, closestPoint)) <= maximumDistanceSquared) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 std::vector<std::vector<Vector2>> Intersection::getPedestrianCrossings(float sidewalkExtension) const {
     std::vector<std::vector<Vector2>> crossings;
-    if (surfacePolygon.size() != 4) {
+    if (surfacePolygon.size() < 3) {
         return crossings;
     }
 
@@ -78,30 +149,38 @@ std::vector<std::vector<Vector2>> Intersection::getPedestrianCrossings(float sid
         return length > 0.0001f ? Vector2Scale(value, 1.0f / length) : Vector2{ 0.0f, 0.0f };
     };
 
-    for (std::size_t edgeIndex = 0; edgeIndex < 2; ++edgeIndex) {
-        const Vector2 firstEdgeStart = surfacePolygon[edgeIndex];
-        const Vector2 firstEdgeEnd = surfacePolygon[(edgeIndex + 1) % 4];
-        const Vector2 oppositeEdgeStart = surfacePolygon[(edgeIndex + 2) % 4];
-        const Vector2 oppositeEdgeEnd = surfacePolygon[(edgeIndex + 3) % 4];
-        const Vector2 firstMidpoint = Vector2Scale(Vector2Add(firstEdgeStart, firstEdgeEnd), 0.5f);
-        const Vector2 oppositeMidpoint = Vector2Scale(
-            Vector2Add(oppositeEdgeStart, oppositeEdgeEnd),
-            0.5f
-        );
-        const Vector2 firstOutward = normalized(Vector2Subtract(firstMidpoint, center));
-        const Vector2 oppositeOutward = normalized(Vector2Subtract(oppositeMidpoint, center));
-        const Vector2 firstInner = interpolate(firstMidpoint, center, 0.5f);
-        const Vector2 oppositeInner = interpolate(oppositeMidpoint, center, 0.5f);
+    constexpr float CROSSWALK_CENTER_OFFSET = CROSSWALK_FIRST_STRIPE_OFFSET +
+        (CROSSWALK_STRIPE_COUNT - 1) * CROSSWALK_STRIPE_SPACING * 0.5f;
 
-        crossings.push_back({
-            Vector2Add(firstMidpoint, Vector2Scale(firstOutward, sidewalkExtension)),
-            firstMidpoint,
-            firstInner,
-            center,
-            oppositeInner,
-            oppositeMidpoint,
-            Vector2Add(oppositeMidpoint, Vector2Scale(oppositeOutward, sidewalkExtension))
-        });
+    // Each painted crossing spans one road along an intersection edge.
+    // Connecting opposite edges instead sends pedestrians through the
+    // junction in the direction of traffic.
+    for (std::size_t edgeIndex = 0; edgeIndex < surfacePolygon.size(); ++edgeIndex) {
+        const Vector2 firstEdgeStart = surfacePolygon[edgeIndex];
+        const Vector2 firstEdgeEnd = surfacePolygon[(edgeIndex + 1) % surfacePolygon.size()];
+        const Vector2 edgeDirection = normalized(Vector2Subtract(firstEdgeEnd, firstEdgeStart));
+        const Vector2 edgeMidpoint = Vector2Scale(Vector2Add(firstEdgeStart, firstEdgeEnd), 0.5f);
+        const Vector2 inwardDirection = normalized(Vector2Subtract(center, edgeMidpoint));
+        const Vector2 crosswalkOffset = Vector2Scale(inwardDirection, CROSSWALK_CENTER_OFFSET);
+        const Vector2 routeStart = Vector2Add(
+            Vector2Add(firstEdgeStart, crosswalkOffset),
+            Vector2Scale(edgeDirection, -sidewalkExtension)
+        );
+        const Vector2 routeEnd = Vector2Add(
+            Vector2Add(firstEdgeEnd, crosswalkOffset),
+            Vector2Scale(edgeDirection, sidewalkExtension)
+        );
+
+        std::vector<Vector2> crossing;
+        crossing.reserve(7);
+        for (int step = 0; step <= 6; ++step) {
+            crossing.push_back(interpolate(
+                routeStart,
+                routeEnd,
+                static_cast<float>(step) / 6.0f
+            ));
+        }
+        crossings.push_back(std::move(crossing));
     }
 
     return crossings;
@@ -118,22 +197,69 @@ void Intersection::Draw() const {
     }
     center = Vector2Scale(center, 1.0f / static_cast<float>(surfacePolygon.size()));
 
+    for (const auto& corner : sidewalkCorners) {
+        for (int row = 0; row < SIDEWALK_CORNER_SLABS; ++row) {
+            for (int column = 0; column < SIDEWALK_CORNER_SLABS; ++column) {
+                const float acrossStart = static_cast<float>(column) / SIDEWALK_CORNER_SLABS;
+                const float acrossEnd = static_cast<float>(column + 1) / SIDEWALK_CORNER_SLABS;
+                const float alongStart = static_cast<float>(row) / SIDEWALK_CORNER_SLABS;
+                const float alongEnd = static_cast<float>(row + 1) / SIDEWALK_CORNER_SLABS;
+                const std::array<Vector2, 4> slab = {
+                    bilinear(corner, acrossStart, alongStart),
+                    bilinear(corner, acrossEnd, alongStart),
+                    bilinear(corner, acrossEnd, alongEnd),
+                    bilinear(corner, acrossStart, alongEnd)
+                };
+                const Color color = (row + column) % 2 == 0
+                    ? SIDEWALK_CORNER_COLOR
+                    : SIDEWALK_CORNER_ALT_COLOR;
+                drawSidewalkSlab(slab, color);
+            }
+        }
+
+        for (int subdivision = 1; subdivision < SIDEWALK_CORNER_SLABS; ++subdivision) {
+            const float amount = static_cast<float>(subdivision) / SIDEWALK_CORNER_SLABS;
+            DrawLineEx(
+                bilinear(corner, amount, 0.0f),
+                bilinear(corner, amount, 1.0f),
+                SIDEWALK_CORNER_JOINT_WIDTH,
+                SIDEWALK_CORNER_JOINT_COLOR
+            );
+            DrawLineEx(
+                bilinear(corner, 0.0f, amount),
+                bilinear(corner, 1.0f, amount),
+                SIDEWALK_CORNER_JOINT_WIDTH,
+                SIDEWALK_CORNER_JOINT_COLOR
+            );
+        }
+    }
+
+    std::vector<Vector2> drawSurfacePolygon;
+    drawSurfacePolygon.reserve(surfacePolygon.size());
+    for (const Vector2 point : surfacePolygon) {
+        const Vector2 radial = Vector2Subtract(point, center);
+        const float radius = Vector2Length(radial);
+        drawSurfacePolygon.push_back(radius <= 0.0001f
+            ? point
+            : Vector2Add(point, Vector2Scale(radial, INTERSECTION_SEAM_OVERDRAW / radius)));
+    }
+
     float signedArea = 0.0f;
-    for (std::size_t index = 0; index < surfacePolygon.size(); ++index) {
-        const Vector2 next = surfacePolygon[(index + 1) % surfacePolygon.size()];
-        signedArea += surfacePolygon[index].x * next.y - next.x * surfacePolygon[index].y;
+    for (std::size_t index = 0; index < drawSurfacePolygon.size(); ++index) {
+        const Vector2 next = drawSurfacePolygon[(index + 1) % drawSurfacePolygon.size()];
+        signedArea += drawSurfacePolygon[index].x * next.y - next.x * drawSurfacePolygon[index].y;
     }
 
     std::vector<Vector2> fanPoints;
-    fanPoints.reserve(surfacePolygon.size() + 2);
+    fanPoints.reserve(drawSurfacePolygon.size() + 2);
     fanPoints.push_back(center);
     // Raylib's 2D projection flips the y axis, and backface culling is enabled.
     // Keep the world-space perimeter clockwise so it becomes front-facing after projection.
     if (signedArea < 0.0f) {
-        fanPoints.insert(fanPoints.end(), surfacePolygon.begin(), surfacePolygon.end());
+        fanPoints.insert(fanPoints.end(), drawSurfacePolygon.begin(), drawSurfacePolygon.end());
     }
     else {
-        fanPoints.insert(fanPoints.end(), surfacePolygon.rbegin(), surfacePolygon.rend());
+        fanPoints.insert(fanPoints.end(), drawSurfacePolygon.rbegin(), drawSurfacePolygon.rend());
     }
     fanPoints.push_back(fanPoints[1]);
 

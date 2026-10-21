@@ -8,15 +8,21 @@
 
 class Road {
 public:
+    static constexpr float SIDEWALK_WIDTH = 30.0f;
+
     Road(float centerX, float centerY, float heading, float width, float length);
     Road(std::vector<Vector2> centerline, float width);
 
-    void Draw(const std::vector<Intersection>& intersections) const;
+    void Draw(
+        const std::vector<Intersection>& intersections,
+        const std::vector<Road>& roads
+    ) const;
     Lane& getRightLane();
     const Lane& getRightLane() const;
     Lane& getLeftLane();
     const Lane& getLeftLane() const;
     float getWidth() const;
+    Rectangle getPavedBounds() const;
     const std::vector<Vector2>& getCenterline() const;
     const std::vector<Vector2>& getRightBikeLane() const;
     const std::vector<Vector2>& getLeftBikeLane() const;
@@ -40,6 +46,7 @@ private:
 
     std::vector<Vector2> centerline;
     float width;
+    Rectangle pavedBounds;
     Lane rightLane;
     Lane leftLane;
     std::vector<Vector2> rightBikeLane;

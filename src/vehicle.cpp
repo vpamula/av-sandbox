@@ -59,6 +59,39 @@ void Vehicle::Draw() const {
     Draw(MAROON);
 }
 
+void Vehicle::DrawEgo() const {
+    constexpr Color OUTLINE_COLOR = { 18, 24, 31, 255 };
+    constexpr Color BODY_COLOR = { 240, 246, 250, 255 };
+    constexpr Color ACCENT_COLOR = { 255, 35, 190, 255 };
+    const float rotation = heading * RAD2DEG;
+
+    DrawRectanglePro(
+        { x, y, length + 12.0f, width + 12.0f },
+        { (length + 12.0f) / 2.0f, (width + 12.0f) / 2.0f },
+        rotation,
+        OUTLINE_COLOR
+    );
+    DrawRectanglePro(
+        { x, y, length, width },
+        { length / 2.0f, width / 2.0f },
+        rotation,
+        BODY_COLOR
+    );
+    DrawRectanglePro(
+        { x, y, length * 0.72f, width * 0.32f },
+        { length * 0.36f, width * 0.16f },
+        rotation,
+        ACCENT_COLOR
+    );
+
+    const float frontOffset = length / 2.5f;
+    DrawCircleV(
+        { x + frontOffset * std::cos(heading), y + frontOffset * std::sin(heading) },
+        7.0f,
+        ACCENT_COLOR
+    );
+}
+
 void Vehicle::Draw(Color bodyColor) const {
     DrawRectanglePro(
         { x, y, length, width },

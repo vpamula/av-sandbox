@@ -4,6 +4,7 @@
 #include "raylib.h"
 #include "trafficcontrol.h"
 
+#include <array>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -14,7 +15,9 @@ public:
 
     Rectangle getBounds() const;
     bool containsPoint(Vector2 point) const;
+    bool containsPointWithinDistance(Vector2 point, float distance) const;
     std::vector<std::vector<Vector2>> getPedestrianCrossings(float sidewalkExtension) const;
+    void setSidewalkCorners(std::vector<std::array<Vector2, 4>> corners);
     void Draw() const;
     void setStopControlled(bool enabled);
     bool isStopControlled() const;
@@ -44,6 +47,7 @@ private:
 
     Rectangle bounds;
     std::vector<Vector2> surfacePolygon;
+    std::vector<std::array<Vector2, 4>> sidewalkCorners;
     std::vector<Lane*> connectedLanes;
     std::unordered_map<const Lane*, std::vector<Lane*>> transitions;
     bool stopControlled = false;
