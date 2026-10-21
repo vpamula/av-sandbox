@@ -1,32 +1,26 @@
 #pragma once
-#include "raylib.h"
-#include "lane.h"
-#include <vector>
-#include <unordered_map>
 
-enum class TurnType {
-    STRAIGHT,
-    LEFT,
-    RIGHT,
-    INVALID
-};
+#include "lane.h"
+#include "raylib.h"
+
+#include <unordered_map>
+#include <vector>
 
 class Intersection {
-    public:
-        Intersection(Rectangle bounds);
-        Rectangle getBounds() const;
-        void Draw();
-        void addLane(Lane* lane);
-        std::vector<Lane*>& getConnectedLanes();
-        void computeTransitions();
-        const std::vector<std::pair<Lane*, TurnType>>& getNextLanes(Lane* incomingLane);        TurnType classifyTurn(Lane* incoming, Lane* outgoing);
+public:
+    explicit Intersection(Rectangle bounds);
 
-    
-    private:
-        bool isValidTransition(Lane* incoming, Lane* outgoing);
+    Rectangle getBounds() const;
+    void Draw() const;
+    void addLane(Lane* lane);
+    const std::vector<Lane*>& getConnectedLanes() const;
+    void computeTransitions();
+    const std::vector<Lane*>& getNextLanes(const Lane* incomingLane) const;
 
-    private:
-        Rectangle bounds;
-        std::vector<Lane*> connectedLanes;
-        std::unordered_map<Lane*, std::vector<std::pair<Lane*, TurnType>>> transitions;        
+private:
+    bool isValidTransition(const Lane* incomingLane, const Lane* outgoingLane) const;
+
+    Rectangle bounds;
+    std::vector<Lane*> connectedLanes;
+    std::unordered_map<const Lane*, std::vector<Lane*>> transitions;
 };

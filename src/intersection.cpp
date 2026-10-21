@@ -1,114 +1,51 @@
 #include "intersection.h"
-#include <iostream>
 
-Intersection::Intersection(Rectangle bounds) {
-    this->bounds = bounds;
-}
+Intersection::Intersection(Rectangle bounds) : bounds(bounds) {}
 
-Rectangle Intersection::getBounds() const {
-    return bounds;
-}
+Rectangle Intersection::getBounds() const { return bounds; }
 
-void Intersection::Draw() {
-    DrawRectangleRec(bounds,GRAY);
+void Intersection::Draw() const {
+    DrawRectangleRec(bounds, GRAY);
 }
 
 void Intersection::addLane(Lane* lane) {
     connectedLanes.push_back(lane);
 }
 
-std::vector<Lane*>& Intersection::getConnectedLanes() {
+const std::vector<Lane*>& Intersection::getConnectedLanes() const {
     return connectedLanes;
 }
 
 void Intersection::computeTransitions() {
     transitions.clear();
-    for (Lane* incoming : connectedLanes) {
-        std::vector<std::pair<Lane*, TurnType>>
-            nextLanes;
-        std::cout << "Incoming lane: "
-                  << incoming->getId()
-                  << "\n";
-        for (Lane* outgoing : connectedLanes) {
-            if (incoming == outgoing) {
-                continue;
+
+    for (Lane* incomingLane : connectedLanes) {
+        auto& outgoingLanes = transitions[incomingLane];
+        for (Lane* outgoingLane : connectedLanes) {
+            if (isValidTransition(incomingLane, outgoingLane)) {
+                outgoingLanes.push_back(outgoingLane);
             }
-            TurnType turnType =
-                classifyTurn(
-                    incoming,
-                    outgoing
-                );
-            if (turnType ==
-                TurnType::INVALID) {
-                continue;
-            }
-            nextLanes.push_back({
-                outgoing,
-                turnType
-            });
-            std::string turnString;
-            switch (turnType) {
-                case TurnType::LEFT:
-                    turnString = "LEFT";
-                    break;
-                case TurnType::RIGHT:
-                    turnString = "RIGHT";
-                    break;
-                case TurnType::STRAIGHT:
-                    turnString = "STRAIGHT";
-                    break;
-                default:
-                    turnString = "INVALID";
-            }
-            std::cout
-                << "    -> Lane "
-                << outgoing->getId()
-                << " ("
-                << turnString
-                << ")\n";
         }
-        transitions[incoming] = nextLanes;
     }
 }
 
-const std::vector<std::pair<Lane*, TurnType>>& Intersection::getNextLanes(Lane* incomingLane) {
-    static const std::vector<std::pair<Lane*, TurnType>> empty;    
-    auto it = transitions.find(incomingLane);
-    if (it == transitions.end()) {
-        return empty;
-    }
-    return it->second;
+const std::vector<Lane*>& Intersection::getNextLanes(const Lane* incomingLane) const {
+    static const std::vector<Lane*> noTransitions;
+    const auto transition = transitions.find(incomingLane);
+    return transition == transitions.end() ? noTransitions : transition->second;
 }
 
-TurnType Intersection::classifyTurn(Lane* incoming, Lane* outgoing) {
-    Vector2 inDir = incoming->getDirection();
-    Vector2 outDir = outgoing->getDirection();
-
-    float dot = inDir.x * outDir.x + inDir.y * outDir.y;
-
-    float cross = inDir.x * outDir.y - inDir.y * outDir.x;
-
-    if (dot < -0.8f) {
-        return TurnType::INVALID;
-    }
-
-    if (dot > 0.8f) {
-        return TurnType::STRAIGHT;
-    }
-
-    if (cross > 0.0f) {
-        return TurnType::LEFT;
-    }
-
-    return TurnType::RIGHT;
-}
-
-bool Intersection::isValidTransition(Lane* incoming, Lane* outgoing) {
-    Vector2 inDir = incoming->getDirection();
-    Vector2 outDir = outgoing->getDirection();
-    float dot = inDir.x * outDir.x + inDir.y * outDir.y;
-    if (dot < -0.8f) {
+bool Intersection::isValidTransition(const Lane* incomingLane, const Lane* outgoingLane) const {
+    if (!incomingLane || !outgoingLane || incomingLane == outgoingLane) {
         return false;
     }
-    return true;
+
+    const Vector2 incomingDirection = incomingLane->getDirection();
+    const Vector2 outgoingDirection = outgoingLane->getDirection();
+    const float directionDot = incomingDirection.x * outgoingDirection.x +
+        incomingDirection.y * outgoingDirection.y;
+
+    // The current road model has one lane in each direction. Allow straight,
+    // left, and right movements; reject only a near-180-degree U-turn.
+    return directionDot > -0.8f;
 }

@@ -1,37 +1,21 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.16)
 
-project(av-sandbox)
+project(av-sandbox LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-include_directories(/opt/homebrew/include)
-
-link_directories(/opt/homebrew/lib)
+find_package(raylib CONFIG REQUIRED)
 
 add_executable(av-sandbox
-
     src/main.cpp
-
     src/vehicle.cpp
-
     src/road.cpp
-
-    src/path.cpp
-
     src/lanefollower.cpp
-
-    src/trajectorygenerator.cpp
-
     src/lane.cpp
-
-    src/pathbuilder.cpp
-
+    src/roadgraph.cpp
     src/world.cpp
-
     src/intersection.cpp
-
-    src/route.cpp
-
 )
 
-target_link_libraries(av-sandbox raylib)
+target_link_libraries(av-sandbox PRIVATE raylib)

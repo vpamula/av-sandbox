@@ -1,77 +1,64 @@
 #include "vehicle.h"
 
+#include <algorithm>
 #include <cmath>
 
-Vehicle::Vehicle(float startX, float startY, float length, float width) {
-    x = startX;
-    y = startY;
-    vehicleLength = length;
-    vehicleWidth = width;
-
-    heading = 0.0f;
-    speed = 200.0f;
-    steeringAngle = 0.0f;
+namespace {
+constexpr float MAX_STEERING_ANGLE = 0.87f;
+constexpr float STEERING_RETURN_RATE = 8.0f;
+constexpr float ROLLING_FRICTION_PER_FRAME = 0.99f;
 }
 
+Vehicle::Vehicle(float startX, float startY, float length, float width)
+    : x(startX),
+      y(startY),
+      heading(0.0f),
+      speed(200.0f),
+      steeringAngle(0.0f),
+      length(length),
+      width(width) {}
 
+void Vehicle::Update(float dt, bool manualControl) {
+    if (manualControl) {
+        if (IsKeyDown(KEY_W)) speed += 200.0f * dt;
+        if (IsKeyDown(KEY_S)) speed -= 200.0f * dt;
 
-void Vehicle::Update(float dt)
-{
-    // Throttle
-    if (IsKeyDown(KEY_W)) {
-        speed += 200.0f * dt;
+        if (IsKeyDown(KEY_A)) {
+            steeringAngle -= dt;
+        }
+        else if (IsKeyDown(KEY_D)) {
+            steeringAngle += dt;
+        }
+        else {
+            steeringAngle -= STEERING_RETURN_RATE * steeringAngle * dt;
+        }
+
+        steeringAngle = std::clamp(steeringAngle, -MAX_STEERING_ANGLE, MAX_STEERING_ANGLE);
+        speed = std::max(0.0f, speed);
     }
 
-    if (IsKeyDown(KEY_S)){
-        speed -= 200.0f * dt;
-    }
+    // Scale friction by elapsed time so motion is stable if the frame rate changes.
+    speed *= std::pow(ROLLING_FRICTION_PER_FRAME, dt * 60.0f);
 
-    // Steering
-    if (IsKeyDown(KEY_A)) {
-        steeringAngle -= 1.0f * dt;
-    }
-
-    else if (IsKeyDown(KEY_D)) {
-        steeringAngle += 1.0f * dt;
-    }
-
-    else {
-        steeringAngle += -8.0f * steeringAngle * dt;
-    }
-
-    // Clamp steering
-    if (steeringAngle > 0.87f)
-        steeringAngle = 0.87f;
-
-    if (steeringAngle < -0.87f)
-        steeringAngle = -0.87f;
-
-    // Friction
-    speed *= 0.99f;
-
-    // Vehicle motion
-    heading += (speed / (vehicleLength * (1.0f + 0.00001 * speed * speed))) * tan(steeringAngle) * dt;    
-    x += speed * cos(heading) * dt;
-    y += speed * sin(heading) * dt;
-
+    const float speedSquared = speed * speed;
+    const float turnRate = speed / (length * (1.0f + 0.00001f * speedSquared));
+    heading += turnRate * std::tan(steeringAngle) * dt;
+    x += speed * std::cos(heading) * dt;
+    y += speed * std::sin(heading) * dt;
 }
 
-void Vehicle::Draw()
-{
-    Rectangle rect = {x, y, vehicleLength, vehicleWidth};
-    Vector2 origin = { vehicleLength / 2, vehicleWidth / 2 };
-    float frontOffset = vehicleLength / 2.5;
-    float x_front = x + frontOffset * cos(heading);
-    float y_front = y + frontOffset * sin(heading);
+void Vehicle::Draw() const {
     DrawRectanglePro(
-        rect,
-        origin,
+        { x, y, length, width },
+        { length / 2.0f, width / 2.0f },
         heading * RAD2DEG,
         MAROON
     );
+
+    const float frontOffset = length / 2.5f;
     DrawCircleV(
-        (Vector2){ x_front, y_front },
-        8,
+        { x + frontOffset * std::cos(heading), y + frontOffset * std::sin(heading) },
+        8.0f,
         WHITE
     );
 }

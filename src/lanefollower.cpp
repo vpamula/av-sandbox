@@ -1,44 +1,63 @@
 #include "lanefollower.h"
 
-LaneFollower::LaneFollower() {
-    currentWaypointIndex = 0;
-    steeringGain = 5.0f;
-    lookaheadPoints = 5;
+#include "raymath.h"
+
+#include <algorithm>
+#include <cmath>
+#include <limits>
+
+namespace {
+constexpr float WAYPOINT_REACHED_DISTANCE = 80.0f;
+constexpr float LOW_TURN_SPEED = 80.0f;
+constexpr float CRUISE_SPEED = 200.0f;
+constexpr float MAX_STEERING_COMMAND = 0.8f;
 }
 
-void LaneFollower::reacquireWaypoint(Vehicle& vehicle, const std::vector<Vector2>& waypoints) {
-    float minDistance = 1e9;
-    for (int i = 0; i < waypoints.size(); i++) {
-        float dx = waypoints[i].x - vehicle.getX();
-        float dy = waypoints[i].y - vehicle.getY();
-        float dist = sqrt(dx*dx + dy*dy);
-        if (dist < minDistance) {
-            minDistance = dist;
-            currentWaypointIndex = std::min(i + 3, (int)waypoints.size() - 1);
+LaneFollower::LaneFollower() = default;
+
+void LaneFollower::reacquireWaypoint(const Vehicle& vehicle, const std::vector<Vector2>& waypoints) {
+    currentWaypointIndex = 0;
+    if (waypoints.empty()) {
+        return;
+    }
+
+    const Vector2 vehiclePosition = { vehicle.getX(), vehicle.getY() };
+    float closestDistance = std::numeric_limits<float>::infinity();
+    for (std::size_t index = 0; index < waypoints.size(); ++index) {
+        const float distance = Vector2Distance(vehiclePosition, waypoints[index]);
+        if (distance < closestDistance) {
+            closestDistance = distance;
+            currentWaypointIndex = index;
         }
     }
 }
 
-void LaneFollower::Update(Vehicle& vehicle, const std::vector<Vector2>& waypoints, float dt) {
-        int lookaheadIndex = std::min(currentWaypointIndex + lookaheadPoints, (int)waypoints.size() - 1);
-        Vector2 target = waypoints[lookaheadIndex];
-        float dx = target.x - vehicle.getX();
-        float dy = target.y - vehicle.getY();
-        float desired_heading = atan2(dy, dx);
-        float headingError = desired_heading - vehicle.getHeading();
-        float absHeadingError = abs(headingError);
-        float targetSpeed;
-        if (absHeadingError > 0.1f) {
-            targetSpeed = 80.0f;
-        } else {
-            targetSpeed = 200.0f;
-        }
-        vehicle.setSpeed(targetSpeed);
-        float steeringCommand = headingError * steeringGain;
-        steeringCommand = std::clamp(steeringCommand, -0.8f, 0.8f);
-        vehicle.setSteeringAngle(steeringCommand);
-        float distance = sqrt(dx*dx + dy*dy);
-        if (distance < 80.0f and currentWaypointIndex < waypoints.size() - 1) {
-            currentWaypointIndex++;
-        }
+void LaneFollower::update(Vehicle& vehicle, const std::vector<Vector2>& waypoints, float dt) {
+    if (waypoints.empty() || dt <= 0.0f) {
+        vehicle.setSpeed(0.0f);
+        vehicle.setSteeringAngle(0.0f);
+        return;
+    }
+
+    const std::size_t lookaheadIndex = std::min(
+        currentWaypointIndex + lookaheadPoints,
+        waypoints.size() - 1
+    );
+    const Vector2 target = waypoints[lookaheadIndex];
+    const Vector2 vehiclePosition = { vehicle.getX(), vehicle.getY() };
+    const float desiredHeading = std::atan2(target.y - vehiclePosition.y, target.x - vehiclePosition.x);
+    const float headingError = std::remainder(desiredHeading - vehicle.getHeading(), 2.0f * PI);
+    const float absHeadingError = std::abs(headingError);
+
+    vehicle.setSpeed(absHeadingError > 0.1f ? LOW_TURN_SPEED : CRUISE_SPEED);
+    vehicle.setSteeringAngle(std::clamp(
+        headingError * steeringGain,
+        -MAX_STEERING_COMMAND,
+        MAX_STEERING_COMMAND
+    ));
+
+    if (Vector2Distance(vehiclePosition, target) < WAYPOINT_REACHED_DISTANCE &&
+        currentWaypointIndex + 1 < waypoints.size()) {
+        ++currentWaypointIndex;
+    }
 }

@@ -1,74 +1,81 @@
 #include "world.h"
-#include <iostream>
+
+#include <algorithm>
+#include <utility>
+
+std::optional<Vector2> World::findNearestRoadPoint(Vector2 worldPoint, float maxDistance) const {
+    return graph.snapPointToRoad(worldPoint, maxDistance);
+}
+
+std::vector<Vector2> World::buildRouteBetweenPoints(Vector2 start, Vector2 end) const {
+    const auto snappedStart = graph.snapPointToRoad(start, 200.0f);
+    const auto snappedEnd = graph.snapPointToRoad(end, 200.0f);
+    if (!snappedStart || !snappedEnd) {
+        return {};
+    }
+
+    return graph.findRoute(*snappedStart, *snappedEnd);
+}
 
 void World::addRoad(Road road) {
-    roads.push_back(road);
+    roads.push_back(std::move(road));
 }
 
-std::vector<Road>& World::getRoads() {
+const std::vector<Road>& World::getRoads() const {
     return roads;
-}
-
-std::vector<Intersection>& World::getIntersections() {
-    return intersections;
 }
 
 void World::computeIntersections() {
     intersections.clear();
 
-    for (int i = 0; i < roads.size(); i++) {
-        for (int j = i + 1; j < roads.size(); j++) {
-            Rectangle a = roads[i].getBounds();
-            Rectangle b = roads[j].getBounds();
+    for (size_t firstRoad = 0; firstRoad < roads.size(); ++firstRoad) {
+        for (size_t secondRoad = firstRoad + 1; secondRoad < roads.size(); ++secondRoad) {
+            const Rectangle firstBounds = roads[firstRoad].getBounds();
+            const Rectangle secondBounds = roads[secondRoad].getBounds();
+            if (!CheckCollisionRecs(firstBounds, secondBounds)) {
+                continue;
+            }
 
-            if (CheckCollisionRecs(a, b)) {
-                float left = std::max(
-                    a.x,
-                    b.x
-                );
+            const float left = std::max(firstBounds.x, secondBounds.x);
+            const float right = std::min(firstBounds.x + firstBounds.width, secondBounds.x + secondBounds.width);
+            const float top = std::max(firstBounds.y, secondBounds.y);
+            const float bottom = std::min(firstBounds.y + firstBounds.height, secondBounds.y + secondBounds.height);
 
-                float right = std::min(
-                        a.x + a.width,
-                        b.x + b.width
-                    );
+            Intersection intersection({ left, top, right - left, bottom - top });
+            intersection.addLane(&roads[firstRoad].getRightLane());
+            intersection.addLane(&roads[firstRoad].getLeftLane());
+            intersection.addLane(&roads[secondRoad].getRightLane());
+            intersection.addLane(&roads[secondRoad].getLeftLane());
+            intersection.computeTransitions();
+            intersections.push_back(std::move(intersection));
+        }
+    }
 
-                float top = std::max(
-                        a.y,
-                        b.y
-                    );
+    rebuildGraph();
+}
 
-                float bottom = std::min(
-                        a.y + a.height,
-                        b.y + b.height
-                    );
+void World::rebuildGraph() {
+    graph = RoadGraph();
 
-                Rectangle overlap = {
-                    left,
-                    top,
-                    right - left,
-                    bottom - top
-                };
+    for (const Road& road : roads) {
+        graph.addRoad(road);
+    }
 
-                Intersection intersection(overlap);
-
-                intersection.addLane(&roads[i].getRightLane());
-                intersection.addLane(&roads[i].getLeftLane());
-                intersection.addLane(&roads[j].getRightLane());
-                intersection.addLane(&roads[j].getLeftLane());
-                intersection.computeTransitions();
-                intersections.push_back(intersection);
-                std::cout << "Intersection created with " << intersection.getConnectedLanes().size() << " lanes\n";
+    for (const Intersection& intersection : intersections) {
+        for (Lane* incomingLane : intersection.getConnectedLanes()) {
+            for (Lane* outgoingLane : intersection.getNextLanes(incomingLane)) {
+                graph.addLaneTransition(incomingLane, outgoingLane, intersection.getBounds());
             }
         }
     }
 }
 
-void World::Draw() {
-    for (Road& road : roads) {
+void World::Draw() const {
+    for (const Road& road : roads) {
         road.Draw(intersections);
     }
 
-    for (Intersection& intersection : intersections) {
+    for (const Intersection& intersection : intersections) {
         intersection.Draw();
     }
 }

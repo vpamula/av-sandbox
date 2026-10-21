@@ -1,31 +1,28 @@
 #pragma once
 
-#include "raylib.h"
-#include "lane.h"
 #include "intersection.h"
+#include "lane.h"
+#include "raylib.h"
+
 #include <vector>
 
 class Road {
-    public: 
-        Road(float center_x, float center_y, float heading, float width, float length);
-        void Draw(
-            const std::vector<Intersection>& intersections
-        );
-        Lane& getRightLane();
-        Lane& getLeftLane();
-        float getWidth() {
-            return width;
-        }
-        std::vector<Vector2> generateLaneWaypoints(bool rightLane);
-        Rectangle getBounds();
+public:
+    Road(float centerX, float centerY, float heading, float width, float length);
 
-    private:
-        float center_x;
-        float center_y;
-        float heading;
-        float width;
-        float length;
-        Lane rightLane;
-        Lane leftLane;
+    void Draw(const std::vector<Intersection>& intersections) const;
+    Lane& getRightLane();
+    const Lane& getRightLane() const;
+    Lane& getLeftLane();
+    const Lane& getLeftLane() const;
+    Rectangle getBounds() const;
 
+private:
+    float centerX;
+    float centerY;
+    float heading;
+    float width;
+    float length;
+    Lane rightLane;
+    Lane leftLane;
 };
