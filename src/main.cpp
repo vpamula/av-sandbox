@@ -76,6 +76,7 @@ int main()
             drivingToSelectedStart = false;
             routeCompleted = false;
             startRouteClickPoint = {0.0f, 0.0f};
+            controller.setRouteControls({});
             autonomousMode = true;
         }
 
@@ -151,6 +152,9 @@ int main()
                         const std::vector<Vector2>& activeRoute = drivingToSelectedStart
                             ? routeToSelectedStart
                             : routeFromSelectedStart;
+                        controller.setRouteControls(
+                            world.getRouteControlsAlongRoute(activeRoute, vehicle.getLength())
+                        );
                         controller.reacquireWaypoint(vehicle, activeRoute);
                         autonomousMode = true;
                     }
@@ -204,6 +208,12 @@ int main()
         }
 
         if (!paused) {
+            world.updateTrafficLights(dt);
+            controller.setTrafficLightAspects(
+                world.getTrafficLightAspect(true),
+                world.getTrafficLightAspect(false)
+            );
+
             if (routeCompleted) {
                 vehicle.setSpeed(0.0f);
                 vehicle.setSteeringAngle(0.0f);
@@ -219,6 +229,9 @@ int main()
                         routeToSelectedStart.back()
                     ) <= 60.0f) {
                     drivingToSelectedStart = false;
+                    controller.setRouteControls(
+                        world.getRouteControlsAlongRoute(routeFromSelectedStart, vehicle.getLength())
+                    );
                     controller.reacquireWaypoint(vehicle, routeFromSelectedStart);
                 }
 
@@ -290,10 +303,22 @@ int main()
 
         DrawText(TextFormat("Speed: %.1f", vehicle.getSpeed()), 20, 100, 30, WHITE);
         DrawText(TextFormat("Heading Angle: %.2f", vehicle.getHeading() * RAD2DEG), 20, 140, 30, WHITE);
-        const char* motionStatus = routeCompleted ? "ARRIVED" : (paused ? "PAUSED" : "RUNNING");
-        const Color motionStatusColor = routeCompleted ? SKYBLUE : (paused ? YELLOW : GREEN);
+        const char* motionStatus = routeCompleted
+            ? "ARRIVED"
+            : (paused
+                ? "PAUSED"
+                : (controller.isWaitingAtStopSign()
+                    ? "STOP SIGN"
+                    : (controller.isWaitingAtTrafficLight() ? "TRAFFIC LIGHT" : "RUNNING")));
+        const Color motionStatusColor = routeCompleted
+            ? SKYBLUE
+            : (paused
+                ? YELLOW
+                : ((controller.isWaitingAtStopSign() || controller.isWaitingAtTrafficLight())
+                    ? ORANGE
+                    : GREEN));
         DrawText(motionStatus, 20, 180, 30, motionStatusColor);
-        DrawText("5x5 BLOCK GRID WITH CURVED STREETS", 20, 220, 18, WHITE);
+        DrawText("5x5 GRID WITH A STOP SIGN AND TRAFFIC LIGHT JUNCTION", 20, 220, 18, WHITE);
         DrawText("BLUE: current position to start click", 20, 245, 18, SKYBLUE);
         DrawText("YELLOW: start click to destination click", 20, 270, 18, YELLOW);
 

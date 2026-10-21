@@ -45,8 +45,22 @@ Road::Road(std::vector<Vector2> points, float roadWidth)
       leftLane(makeLaneWaypoints(centerline, -width / 4.0f, true)) {}
 
 void Road::Draw(const std::vector<Intersection>& intersections) const {
+    const std::vector<Vector2> positiveEdge = offsetPolyline(centerline, width * 0.5f);
+    const std::vector<Vector2> negativeEdge = offsetPolyline(centerline, -width * 0.5f);
+
     for (std::size_t index = 1; index < centerline.size(); ++index) {
-        DrawLineEx(centerline[index - 1], centerline[index], width, DARKGRAY);
+        DrawTriangle(
+            positiveEdge[index - 1],
+            positiveEdge[index],
+            negativeEdge[index],
+            DARKGRAY
+        );
+        DrawTriangle(
+            positiveEdge[index - 1],
+            negativeEdge[index],
+            negativeEdge[index - 1],
+            DARKGRAY
+        );
     }
 
     const float dashPeriod = DASH_LENGTH + DASH_GAP;

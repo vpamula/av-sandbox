@@ -5,12 +5,17 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <utility>
 
 namespace {
 constexpr float LOOKAHEAD_DISTANCE = 45.0f;
 constexpr float LOW_TURN_SPEED = 80.0f;
 constexpr float CRUISE_SPEED = 200.0f;
 constexpr float MAX_STEERING_COMMAND = 0.87f;
+constexpr float STOPPING_DECELERATION = 360.0f;
+constexpr float STOP_POSITION_TOLERANCE = 12.0f;
+constexpr float STOP_DWELL_SECONDS = 1.25f;
+constexpr float AUTONOMOUS_ACCELERATION = 180.0f;
 constexpr std::size_t SEGMENTS_TO_SEARCH_AHEAD = 12;
 
 struct SegmentProjection {
@@ -36,9 +41,47 @@ SegmentProjection projectOntoSegment(Vector2 point, Vector2 start, Vector2 end) 
 Vector2 interpolate(Vector2 start, Vector2 end, float amount) {
     return Vector2Add(start, Vector2Scale(Vector2Subtract(end, start), amount));
 }
+
+float routeDistanceAt(
+    const std::vector<Vector2>& waypoints,
+    std::size_t segmentIndex,
+    float amount
+) {
+    float distance = 0.0f;
+    for (std::size_t index = 0; index < segmentIndex; ++index) {
+        distance += Vector2Distance(waypoints[index], waypoints[index + 1]);
+    }
+
+    return distance + Vector2Distance(waypoints[segmentIndex], waypoints[segmentIndex + 1]) * amount;
+}
 }
 
 LaneFollower::LaneFollower() = default;
+
+void LaneFollower::setRouteControls(std::vector<RouteControlPoint> controls) {
+    std::sort(controls.begin(), controls.end(), [](const RouteControlPoint& first, const RouteControlPoint& second) {
+        return first.distance < second.distance;
+    });
+    routeControls = std::move(controls);
+    currentControlIndex = 0;
+    waitingAtControl = false;
+    stopWaitRemaining = 0.0f;
+}
+
+void LaneFollower::setTrafficLightAspects(TrafficLightAspect horizontal, TrafficLightAspect vertical) {
+    horizontalSignal = horizontal;
+    verticalSignal = vertical;
+}
+
+bool LaneFollower::isWaitingAtStopSign() const {
+    return waitingAtControl && currentControlIndex < routeControls.size() &&
+        routeControls[currentControlIndex].type == RouteControlType::StopSign;
+}
+
+bool LaneFollower::isWaitingAtTrafficLight() const {
+    return waitingAtControl && currentControlIndex < routeControls.size() &&
+        routeControls[currentControlIndex].type == RouteControlType::TrafficLight;
+}
 
 void LaneFollower::reacquireWaypoint(const Vehicle& vehicle, const std::vector<Vector2>& waypoints) {
     currentWaypointIndex = 0;
@@ -48,6 +91,7 @@ void LaneFollower::reacquireWaypoint(const Vehicle& vehicle, const std::vector<V
 
     const Vector2 vehiclePosition = { vehicle.getX(), vehicle.getY() };
     float closestDistanceSquared = std::numeric_limits<float>::infinity();
+    SegmentProjection closestProjection{};
     for (std::size_t index = 0; index + 1 < waypoints.size(); ++index) {
         const SegmentProjection projection = projectOntoSegment(
             vehiclePosition,
@@ -57,6 +101,15 @@ void LaneFollower::reacquireWaypoint(const Vehicle& vehicle, const std::vector<V
         if (projection.distanceSquared < closestDistanceSquared) {
             closestDistanceSquared = projection.distanceSquared;
             currentWaypointIndex = index;
+            closestProjection = projection;
+        }
+    }
+
+    if (!waitingAtControl) {
+        const float progress = routeDistanceAt(waypoints, currentWaypointIndex, closestProjection.amount);
+        while (currentControlIndex < routeControls.size() &&
+               routeControls[currentControlIndex].distance < progress - STOP_POSITION_TOLERANCE) {
+            ++currentControlIndex;
         }
     }
 }
@@ -93,8 +146,84 @@ void LaneFollower::update(Vehicle& vehicle, const std::vector<Vector2>& waypoint
     }
     currentWaypointIndex = closestSegment;
 
+    const float routeProgress = routeDistanceAt(waypoints, closestSegment, closestProjection.amount);
+    RouteControlPoint* control = currentControlIndex < routeControls.size()
+        ? &routeControls[currentControlIndex]
+        : nullptr;
+    float distanceToControl = control
+        ? control->distance - routeProgress
+        : std::numeric_limits<float>::infinity();
+    bool requiresStop = false;
+
+    if (control) {
+        if (control->type == RouteControlType::StopSign) {
+            requiresStop = true;
+        }
+        else {
+            const TrafficLightAspect aspect = control->horizontalAxis
+                ? horizontalSignal
+                : verticalSignal;
+            if (aspect == TrafficLightAspect::Red) {
+                requiresStop = true;
+            }
+            else if (aspect == TrafficLightAspect::Yellow) {
+                const float stoppingDistance = vehicle.getSpeed() * vehicle.getSpeed() /
+                    (2.0f * STOPPING_DECELERATION);
+                requiresStop = distanceToControl > stoppingDistance + STOP_POSITION_TOLERANCE;
+            }
+
+            if (!waitingAtControl && !requiresStop &&
+                distanceToControl < -STOP_POSITION_TOLERANCE) {
+                ++currentControlIndex;
+                control = nullptr;
+                distanceToControl = std::numeric_limits<float>::infinity();
+            }
+        }
+    }
+
+    if (waitingAtControl && control) {
+        if (control->type == RouteControlType::StopSign) {
+            requiresStop = true;
+            if (vehicle.getSpeed() <= 3.0f) {
+                stopWaitRemaining = std::max(0.0f, stopWaitRemaining - dt);
+                if (stopWaitRemaining <= 0.0f) {
+                    waitingAtControl = false;
+                    ++currentControlIndex;
+                    control = nullptr;
+                    requiresStop = false;
+                }
+            }
+        }
+        else {
+            const TrafficLightAspect aspect = control->horizontalAxis
+                ? horizontalSignal
+                : verticalSignal;
+            if (aspect == TrafficLightAspect::Green) {
+                waitingAtControl = false;
+                ++currentControlIndex;
+                control = nullptr;
+                requiresStop = false;
+            }
+            else {
+                requiresStop = true;
+            }
+        }
+    }
+    else if (control && requiresStop && distanceToControl <= STOP_POSITION_TOLERANCE &&
+             vehicle.getSpeed() <= 3.0f) {
+        waitingAtControl = true;
+        if (control->type == RouteControlType::StopSign) {
+            stopWaitRemaining = STOP_DWELL_SECONDS;
+        }
+    }
+
+    const float distanceUntilControl = requiresStop
+        ? std::max(0.0f, distanceToControl)
+        : std::numeric_limits<float>::infinity();
     Vector2 target = waypoints.back();
-    float remainingDistance = LOOKAHEAD_DISTANCE;
+    float remainingDistance = requiresStop
+        ? std::min(LOOKAHEAD_DISTANCE, std::max(distanceUntilControl, 1.0f))
+        : LOOKAHEAD_DISTANCE;
     Vector2 segmentStart = closestProjection.point;
 
     for (std::size_t index = closestSegment; index + 1 < waypoints.size(); ++index) {
@@ -118,8 +247,30 @@ void LaneFollower::update(Vehicle& vehicle, const std::vector<Vector2>& waypoint
     const float targetDistanceSquared = std::max(Vector2LengthSqr(localTarget), 1.0f);
     const float curvature = 2.0f * localTarget.y / targetDistanceSquared;
     const float targetAngle = std::atan2(localTarget.y, localTarget.x);
-    const float targetSpeed = std::abs(targetAngle) > 0.12f ? LOW_TURN_SPEED : CRUISE_SPEED;
-    vehicle.setSpeed(targetSpeed);
+    float targetSpeed = std::abs(targetAngle) > 0.12f ? LOW_TURN_SPEED : CRUISE_SPEED;
+
+    if (requiresStop) {
+        if (waitingAtControl || distanceUntilControl <= STOP_POSITION_TOLERANCE) {
+            targetSpeed = 0.0f;
+        }
+        else {
+            const float brakingDistance = distanceUntilControl - STOP_POSITION_TOLERANCE;
+            const float safeSpeed = std::sqrt(2.0f * STOPPING_DECELERATION * brakingDistance);
+            targetSpeed = std::min(targetSpeed, safeSpeed);
+        }
+    }
+
+    if (!routeControls.empty()) {
+        vehicle.approachSpeed(
+            targetSpeed,
+            AUTONOMOUS_ACCELERATION,
+            STOPPING_DECELERATION,
+            dt
+        );
+    }
+    else {
+        vehicle.setSpeed(targetSpeed);
+    }
 
     // Match the wheel angle to the vehicle's speed-dependent bicycle model.
     const float speedSquared = targetSpeed * targetSpeed;

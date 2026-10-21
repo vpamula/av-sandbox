@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <random>
 #include <utility>
 
 namespace {
@@ -279,6 +280,39 @@ std::vector<Vector2> World::buildRouteBetweenPoints(Vector2 start, Vector2 end) 
     return graph.findRoute(start, end);
 }
 
+std::vector<RouteControlPoint> World::getRouteControlsAlongRoute(
+    const std::vector<Vector2>& route,
+    float vehicleLength
+) const {
+    std::vector<RouteControlPoint> controls;
+    for (const Intersection& intersection : intersections) {
+        const auto control = intersection.getRouteControlAlongRoute(route, vehicleLength);
+        if (control) {
+            controls.push_back(*control);
+        }
+    }
+
+    std::sort(controls.begin(), controls.end(), [](const RouteControlPoint& first, const RouteControlPoint& second) {
+        return first.distance < second.distance;
+    });
+    return controls;
+}
+
+TrafficLightAspect World::getTrafficLightAspect(bool horizontalAxis) const {
+    for (const Intersection& intersection : intersections) {
+        if (intersection.isTrafficLightControlled()) {
+            return intersection.getTrafficLightAspect(horizontalAxis);
+        }
+    }
+    return TrafficLightAspect::Green;
+}
+
+void World::updateTrafficLights(float dt) {
+    for (Intersection& intersection : intersections) {
+        intersection.updateTrafficLight(dt);
+    }
+}
+
 void World::addRoad(Road road) {
     roads.push_back(std::move(road));
 }
@@ -307,6 +341,157 @@ void World::computeIntersections() {
                 intersection.addLane(&roads[secondRoad].getLeftLane());
                 intersection.computeTransitions();
                 intersections.push_back(std::move(intersection));
+            }
+        }
+    }
+
+    if (!intersections.empty()) {
+        const auto mostCentral = std::min_element(
+            intersections.begin(),
+            intersections.end(),
+            [](const Intersection& first, const Intersection& second) {
+                const Rectangle firstBounds = first.getBounds();
+                const Rectangle secondBounds = second.getBounds();
+                const Vector2 firstCenter = {
+                    firstBounds.x + firstBounds.width * 0.5f,
+                    firstBounds.y + firstBounds.height * 0.5f
+                };
+                const Vector2 secondCenter = {
+                    secondBounds.x + secondBounds.width * 0.5f,
+                    secondBounds.y + secondBounds.height * 0.5f
+                };
+                return Vector2LengthSqr(firstCenter) < Vector2LengthSqr(secondCenter);
+            }
+        );
+        mostCentral->setStopControlled(true);
+
+        // Choose junctions from across the map, with randomized tie-breaking so
+        // traffic controls don't cluster together or always land in the same spots.
+        std::vector<std::size_t> candidates;
+        candidates.reserve(intersections.size() - 1);
+        const std::size_t centralIndex = static_cast<std::size_t>(mostCentral - intersections.begin());
+        for (std::size_t index = 0; index < intersections.size(); ++index) {
+            if (index != centralIndex) {
+                candidates.push_back(index);
+            }
+        }
+        std::random_device seedSource;
+        std::mt19937 random(seedSource());
+        constexpr std::size_t ADDITIONAL_TRAFFIC_LIGHTS = 3;
+        constexpr std::size_t ADDITIONAL_STOP_SIGNS = 2;
+
+        auto centerOf = [&](std::size_t index) {
+            const Rectangle bounds = intersections[index].getBounds();
+            return Vector2{
+                bounds.x + bounds.width * 0.5f,
+                bounds.y + bounds.height * 0.5f
+            };
+        };
+
+        auto assignGridBands = [&](bool useYCoordinate) {
+            constexpr float GRID_LINE_CLUSTER_GAP = 250.0f;
+            std::vector<std::pair<float, std::size_t>> sortedCenters;
+            sortedCenters.reserve(intersections.size());
+            for (std::size_t index = 0; index < intersections.size(); ++index) {
+                const Vector2 center = centerOf(index);
+                sortedCenters.emplace_back(useYCoordinate ? center.y : center.x, index);
+            }
+            std::sort(sortedCenters.begin(), sortedCenters.end());
+
+            std::vector<int> bands(intersections.size(), 0);
+            int band = 0;
+            float bandCenter = sortedCenters.front().first;
+            std::size_t bandSize = 1;
+            bands[sortedCenters.front().second] = band;
+
+            for (std::size_t index = 1; index < sortedCenters.size(); ++index) {
+                const float coordinate = sortedCenters[index].first;
+                if (coordinate - bandCenter > GRID_LINE_CLUSTER_GAP) {
+                    ++band;
+                    bandCenter = coordinate;
+                    bandSize = 1;
+                }
+                else {
+                    bandCenter = (bandCenter * static_cast<float>(bandSize) + coordinate) /
+                        static_cast<float>(bandSize + 1);
+                    ++bandSize;
+                }
+                bands[sortedCenters[index].second] = band;
+            }
+            return bands;
+        };
+
+        const std::vector<int> rowForIntersection = assignGridBands(true);
+        const std::vector<int> columnForIntersection = assignGridBands(false);
+        std::vector<std::size_t> selectedIndices;
+        selectedIndices.reserve(ADDITIONAL_TRAFFIC_LIGHTS + ADDITIONAL_STOP_SIGNS);
+        std::vector<int> occupiedRows = { rowForIntersection[centralIndex] };
+        std::vector<int> occupiedColumns = { columnForIntersection[centralIndex] };
+
+        auto selectFarthestCandidate = [&](const std::vector<std::size_t>& eligible) {
+            float greatestMinimumDistance = -1.0f;
+            std::vector<std::size_t> farthestCandidates;
+
+            for (const std::size_t candidate : eligible) {
+                const Vector2 candidateCenter = centerOf(candidate);
+                float minimumDistance = Vector2Distance(candidateCenter, centerOf(centralIndex));
+                for (const std::size_t selected : selectedIndices) {
+                    minimumDistance = std::min(
+                        minimumDistance,
+                        Vector2Distance(candidateCenter, centerOf(selected))
+                    );
+                }
+
+                if (minimumDistance > greatestMinimumDistance + 0.001f) {
+                    greatestMinimumDistance = minimumDistance;
+                    farthestCandidates.clear();
+                    farthestCandidates.push_back(candidate);
+                }
+                else if (std::abs(minimumDistance - greatestMinimumDistance) <= 0.001f) {
+                    farthestCandidates.push_back(candidate);
+                }
+            }
+
+            std::uniform_int_distribution<std::size_t> chooseCandidate(0, farthestCandidates.size() - 1);
+            return farthestCandidates[chooseCandidate(random)];
+        };
+
+        const std::size_t targetCount = std::min(
+            ADDITIONAL_TRAFFIC_LIGHTS + ADDITIONAL_STOP_SIGNS,
+            candidates.size()
+        );
+        while (selectedIndices.size() < targetCount) {
+            std::vector<std::size_t> eligible;
+            for (const std::size_t candidate : candidates) {
+                const int row = rowForIntersection[candidate];
+                const int column = columnForIntersection[candidate];
+                const bool rowOccupied = std::find(occupiedRows.begin(), occupiedRows.end(), row) != occupiedRows.end();
+                const bool columnOccupied = std::find(occupiedColumns.begin(), occupiedColumns.end(), column) != occupiedColumns.end();
+                if (!rowOccupied && !columnOccupied) {
+                    eligible.push_back(candidate);
+                }
+            }
+            if (eligible.empty()) {
+                break;
+            }
+
+            const std::size_t selected = selectFarthestCandidate(eligible);
+            selectedIndices.push_back(selected);
+            occupiedRows.push_back(rowForIntersection[selected]);
+            occupiedColumns.push_back(columnForIntersection[selected]);
+            candidates.erase(std::find(candidates.begin(), candidates.end(), selected));
+        }
+
+        // There are six rows and columns, so the central stop plus five
+        // additional controls fills unique row/column slots without overlap.
+        std::shuffle(selectedIndices.begin(), selectedIndices.end(), random);
+        const std::size_t trafficLightCount = std::min(ADDITIONAL_TRAFFIC_LIGHTS, selectedIndices.size());
+        for (std::size_t index = 0; index < selectedIndices.size(); ++index) {
+            if (index < trafficLightCount) {
+                intersections[selectedIndices[index]].setTrafficLightControlled(true);
+            }
+            else {
+                intersections[selectedIndices[index]].setStopControlled(true);
             }
         }
     }

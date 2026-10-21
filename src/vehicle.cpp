@@ -18,6 +18,13 @@ Vehicle::Vehicle(float startX, float startY, float length, float width)
       length(length),
       width(width) {}
 
+void Vehicle::approachSpeed(float targetSpeed, float acceleration, float deceleration, float dt) {
+    const float speedChange = targetSpeed - speed;
+    const float maxChange = (speedChange >= 0.0f ? acceleration : deceleration) * dt;
+    speed += std::clamp(speedChange, -maxChange, maxChange);
+    speed = std::max(0.0f, speed);
+}
+
 void Vehicle::Update(float dt, bool manualControl) {
     if (manualControl) {
         if (IsKeyDown(KEY_W)) speed += 200.0f * dt;

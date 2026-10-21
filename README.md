@@ -25,10 +25,10 @@ cmake --build build
 
 - `Road` stores a sampled centerline, creates two offset lane paths, and draws straight or curved road surfaces.
 - `World::makeDowntownGrid` creates the sample city; `World` finds centerline crossings and builds the route graph.
-- `Intersection` lists legal lane-to-lane movements.
+- `Intersection` lists legal lane-to-lane movements and renders stop-sign or traffic-light controls.
 - `RoadGraph` keeps each lane as directed edges, adds explicit spline connections at intersections, and uses Dijkstra's algorithm to find a route.
-- `LaneFollower` steers the vehicle through route waypoints.
+- `LaneFollower` steers through route waypoints and obeys stop signs and traffic lights.
 - `Vehicle` applies steering and speed to a simple bicycle-style motion model.
 - `main.cpp` creates the sample world and handles input, camera, and drawing.
 
-The current world uses sampled sinusoidal curves to create gently bending streets. Traffic signals, NPC vehicles, and collision handling are not implemented yet.
+The current world uses sampled sinusoidal curves to create gently bending streets. Six intersections get controls: three stop-sign junctions and three traffic-light junctions. Their placement is randomized, with no two controls sharing a grid row or column. NPC vehicles and collision handling are not implemented yet.

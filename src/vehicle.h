@@ -17,6 +17,7 @@ public:
 
     void setSteeringAngle(float angle) { steeringAngle = angle; }
     void setSpeed(float newSpeed) { speed = newSpeed; }
+    void approachSpeed(float targetSpeed, float acceleration, float deceleration, float dt);
 
 private:
     float x;
