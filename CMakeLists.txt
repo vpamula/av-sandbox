@@ -9,6 +9,7 @@ find_package(raylib CONFIG REQUIRED)
 
 add_executable(av-sandbox
     src/main.cpp
+    src/npctraffic.cpp
     src/vehicle.cpp
     src/road.cpp
     src/lanefollower.cpp

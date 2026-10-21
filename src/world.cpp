@@ -270,6 +270,16 @@ std::optional<Vector2> World::findNearestRoadPoint(Vector2 worldPoint, float max
     return graph.snapPointToRoad(worldPoint, maxDistance);
 }
 
+bool World::isPointInIntersection(Vector2 worldPoint) const {
+    return std::any_of(
+        intersections.begin(),
+        intersections.end(),
+        [&](const Intersection& intersection) {
+            return intersection.containsPoint(worldPoint);
+        }
+    );
+}
+
 std::vector<Vector2> World::buildRouteBetweenPoints(Vector2 start, Vector2 end) const {
     const auto snappedStart = graph.snapPointToRoad(start, 200.0f);
     const auto snappedEnd = graph.snapPointToRoad(end, 200.0f);

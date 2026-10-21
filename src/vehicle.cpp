@@ -9,10 +9,10 @@ constexpr float STEERING_RETURN_RATE = 8.0f;
 constexpr float ROLLING_FRICTION_PER_FRAME = 0.99f;
 }
 
-Vehicle::Vehicle(float startX, float startY, float length, float width)
+Vehicle::Vehicle(float startX, float startY, float length, float width, float startHeading)
     : x(startX),
       y(startY),
-      heading(0.0f),
+      heading(startHeading),
       speed(200.0f),
       steeringAngle(0.0f),
       length(length),
@@ -55,11 +55,15 @@ void Vehicle::Update(float dt, bool manualControl) {
 }
 
 void Vehicle::Draw() const {
+    Draw(MAROON);
+}
+
+void Vehicle::Draw(Color bodyColor) const {
     DrawRectanglePro(
         { x, y, length, width },
         { length / 2.0f, width / 2.0f },
         heading * RAD2DEG,
-        MAROON
+        bodyColor
     );
 
     const float frontOffset = length / 2.5f;

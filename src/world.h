@@ -18,6 +18,7 @@ public:
 
     const std::vector<Road>& getRoads() const;
     std::optional<Vector2> findNearestRoadPoint(Vector2 worldPoint, float maxDistance = 200.0f) const;
+    bool isPointInIntersection(Vector2 worldPoint) const;
     std::vector<Vector2> buildRouteBetweenPoints(Vector2 start, Vector2 end) const;
     std::vector<RouteControlPoint> getRouteControlsAlongRoute(
         const std::vector<Vector2>& route,

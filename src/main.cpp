@@ -3,6 +3,7 @@
 #include "vehicle.h"
 #include "road.h"
 #include "lanefollower.h"
+#include "npctraffic.h"
 #include "world.h"
 #include <algorithm>
 #include <cmath>
@@ -31,6 +32,7 @@ int main()
     );
 
     LaneFollower controller;
+    NpcTraffic npcTraffic(world, vehicle, 5);
     Camera2D camera = { 0 };
     camera.offset = (Vector2) {SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2};
     camera.zoom = 0.31f;
@@ -255,6 +257,7 @@ int main()
             if (!routeCompleted) {
                 vehicle.Update(dt, !autonomousMode);
             }
+            npcTraffic.update(world, vehicle, dt);
         }
         else {
             vehicle.setSpeed(0.0f);
@@ -289,6 +292,7 @@ int main()
             DrawCircleV(routeFromSelectedStart.back(), 10.0f, RED);
         }
 
+        npcTraffic.Draw();
         vehicle.Draw();
         EndMode2D();
 
@@ -318,7 +322,7 @@ int main()
                     ? ORANGE
                     : GREEN));
         DrawText(motionStatus, 20, 180, 30, motionStatusColor);
-        DrawText("5x5 GRID WITH A STOP SIGN AND TRAFFIC LIGHT JUNCTION", 20, 220, 18, WHITE);
+        DrawText(TextFormat("NPC TRAFFIC: %i CARS", static_cast<int>(npcTraffic.size())), 20, 220, 18, WHITE);
         DrawText("BLUE: current position to start click", 20, 245, 18, SKYBLUE);
         DrawText("YELLOW: start click to destination click", 20, 270, 18, YELLOW);
 

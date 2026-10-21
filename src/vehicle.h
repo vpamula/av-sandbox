@@ -4,10 +4,11 @@
 
 class Vehicle {
 public:
-    Vehicle(float startX, float startY, float length, float width);
+    Vehicle(float startX, float startY, float length, float width, float startHeading = 0.0f);
 
     void Update(float dt, bool manualControl);
     void Draw() const;
+    void Draw(Color bodyColor) const;
 
     float getX() const { return x; }
     float getY() const { return y; }
