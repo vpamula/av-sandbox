@@ -2,11 +2,17 @@
 
 #include "raylib.h"
 
+#include <limits>
+
 class Vehicle {
 public:
     Vehicle(float startX, float startY, float length, float width, float startHeading = 0.0f);
 
-    void Update(float dt, bool manualControl);
+    void Update(
+        float dt,
+        bool manualControl,
+        float maximumSpeed = std::numeric_limits<float>::infinity()
+    );
     void Draw() const;
     void Draw(Color bodyColor) const;
 
@@ -15,9 +21,11 @@ public:
     float getHeading() const { return heading; }
     float getSpeed() const { return speed; }
     float getLength() const { return length; }
+    float getWidth() const { return width; }
 
     void setSteeringAngle(float angle) { steeringAngle = angle; }
     void setSpeed(float newSpeed) { speed = newSpeed; }
+    void setHeading(float newHeading) { heading = newHeading; }
     void approachSpeed(float targetSpeed, float acceleration, float deceleration, float dt);
 
 private:

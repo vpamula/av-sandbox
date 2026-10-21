@@ -14,10 +14,11 @@ public:
 
     Rectangle getBounds() const;
     bool containsPoint(Vector2 point) const;
+    std::vector<std::vector<Vector2>> getPedestrianCrossings(float sidewalkExtension) const;
     void Draw() const;
     void setStopControlled(bool enabled);
     bool isStopControlled() const;
-    void setTrafficLightControlled(bool enabled);
+    void setTrafficLightControlled(bool enabled, float phaseOffsetSeconds = 0.0f);
     bool isTrafficLightControlled() const;
     void updateTrafficLight(float dt);
     TrafficLightAspect getTrafficLightAspect(bool horizontalAxis) const;
@@ -33,6 +34,8 @@ public:
 private:
     struct StopApproach {
         Vector2 lineCenter;
+        Vector2 lineStart;
+        Vector2 lineEnd;
         Vector2 direction;
     };
 

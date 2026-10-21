@@ -8,9 +8,6 @@
 #include <utility>
 
 namespace {
-constexpr float LOOKAHEAD_DISTANCE = 45.0f;
-constexpr float LOW_TURN_SPEED = 80.0f;
-constexpr float CRUISE_SPEED = 200.0f;
 constexpr float MAX_STEERING_COMMAND = 0.87f;
 constexpr float STOPPING_DECELERATION = 360.0f;
 constexpr float STOP_POSITION_TOLERANCE = 12.0f;
@@ -56,7 +53,10 @@ float routeDistanceAt(
 }
 }
 
-LaneFollower::LaneFollower() = default;
+LaneFollower::LaneFollower(float cruiseSpeed, float lowTurnSpeed, float lookaheadDistance)
+    : cruiseSpeed(cruiseSpeed),
+      lowTurnSpeed(lowTurnSpeed),
+      lookaheadDistance(lookaheadDistance) {}
 
 void LaneFollower::setRouteControls(std::vector<RouteControlPoint> controls) {
     std::sort(controls.begin(), controls.end(), [](const RouteControlPoint& first, const RouteControlPoint& second) {
@@ -66,11 +66,15 @@ void LaneFollower::setRouteControls(std::vector<RouteControlPoint> controls) {
     currentControlIndex = 0;
     waitingAtControl = false;
     stopWaitRemaining = 0.0f;
+    stopSignPermission = false;
 }
 
-void LaneFollower::setTrafficLightAspects(TrafficLightAspect horizontal, TrafficLightAspect vertical) {
-    horizontalSignal = horizontal;
-    verticalSignal = vertical;
+void LaneFollower::setTrafficLightStates(const std::vector<TrafficLightState>& states) {
+    trafficLightStates = states;
+}
+
+void LaneFollower::setStopSignPermission(bool permitted) {
+    stopSignPermission = permitted;
 }
 
 bool LaneFollower::isWaitingAtStopSign() const {
@@ -81,6 +85,13 @@ bool LaneFollower::isWaitingAtStopSign() const {
 bool LaneFollower::isWaitingAtTrafficLight() const {
     return waitingAtControl && currentControlIndex < routeControls.size() &&
         routeControls[currentControlIndex].type == RouteControlType::TrafficLight;
+}
+
+std::optional<std::size_t> LaneFollower::getWaitingStopSignIntersectionIndex() const {
+    if (!isWaitingAtStopSign()) {
+        return std::nullopt;
+    }
+    return routeControls[currentControlIndex].intersectionIndex;
 }
 
 void LaneFollower::reacquireWaypoint(const Vehicle& vehicle, const std::vector<Vector2>& waypoints) {
@@ -155,14 +166,20 @@ void LaneFollower::update(Vehicle& vehicle, const std::vector<Vector2>& waypoint
         : std::numeric_limits<float>::infinity();
     bool requiresStop = false;
 
+    auto aspectAtControl = [&](const RouteControlPoint& routeControl) {
+        if (routeControl.intersectionIndex >= trafficLightStates.size()) {
+            return TrafficLightAspect::Green;
+        }
+        const TrafficLightState& state = trafficLightStates[routeControl.intersectionIndex];
+        return routeControl.horizontalAxis ? state.horizontal : state.vertical;
+    };
+
     if (control) {
         if (control->type == RouteControlType::StopSign) {
             requiresStop = true;
         }
         else {
-            const TrafficLightAspect aspect = control->horizontalAxis
-                ? horizontalSignal
-                : verticalSignal;
+            const TrafficLightAspect aspect = aspectAtControl(*control);
             if (aspect == TrafficLightAspect::Red) {
                 requiresStop = true;
             }
@@ -186,8 +203,9 @@ void LaneFollower::update(Vehicle& vehicle, const std::vector<Vector2>& waypoint
             requiresStop = true;
             if (vehicle.getSpeed() <= 3.0f) {
                 stopWaitRemaining = std::max(0.0f, stopWaitRemaining - dt);
-                if (stopWaitRemaining <= 0.0f) {
+                if (stopWaitRemaining <= 0.0f && stopSignPermission) {
                     waitingAtControl = false;
+                    stopSignPermission = false;
                     ++currentControlIndex;
                     control = nullptr;
                     requiresStop = false;
@@ -195,9 +213,7 @@ void LaneFollower::update(Vehicle& vehicle, const std::vector<Vector2>& waypoint
             }
         }
         else {
-            const TrafficLightAspect aspect = control->horizontalAxis
-                ? horizontalSignal
-                : verticalSignal;
+            const TrafficLightAspect aspect = aspectAtControl(*control);
             if (aspect == TrafficLightAspect::Green) {
                 waitingAtControl = false;
                 ++currentControlIndex;
@@ -222,8 +238,8 @@ void LaneFollower::update(Vehicle& vehicle, const std::vector<Vector2>& waypoint
         : std::numeric_limits<float>::infinity();
     Vector2 target = waypoints.back();
     float remainingDistance = requiresStop
-        ? std::min(LOOKAHEAD_DISTANCE, std::max(distanceUntilControl, 1.0f))
-        : LOOKAHEAD_DISTANCE;
+        ? std::min(lookaheadDistance, std::max(distanceUntilControl, 1.0f))
+        : lookaheadDistance;
     Vector2 segmentStart = closestProjection.point;
 
     for (std::size_t index = closestSegment; index + 1 < waypoints.size(); ++index) {
@@ -247,7 +263,7 @@ void LaneFollower::update(Vehicle& vehicle, const std::vector<Vector2>& waypoint
     const float targetDistanceSquared = std::max(Vector2LengthSqr(localTarget), 1.0f);
     const float curvature = 2.0f * localTarget.y / targetDistanceSquared;
     const float targetAngle = std::atan2(localTarget.y, localTarget.x);
-    float targetSpeed = std::abs(targetAngle) > 0.12f ? LOW_TURN_SPEED : CRUISE_SPEED;
+    float targetSpeed = std::abs(targetAngle) > 0.12f ? lowTurnSpeed : cruiseSpeed;
 
     if (requiresStop) {
         if (waitingAtControl || distanceUntilControl <= STOP_POSITION_TOLERANCE) {

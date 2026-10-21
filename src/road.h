@@ -18,6 +18,10 @@ public:
     const Lane& getLeftLane() const;
     float getWidth() const;
     const std::vector<Vector2>& getCenterline() const;
+    const std::vector<Vector2>& getRightBikeLane() const;
+    const std::vector<Vector2>& getLeftBikeLane() const;
+    const std::vector<Vector2>& getRightSidewalk() const;
+    const std::vector<Vector2>& getLeftSidewalk() const;
 
 private:
     static std::vector<Vector2> makeStraightCenterline(
@@ -38,4 +42,8 @@ private:
     float width;
     Lane rightLane;
     Lane leftLane;
+    std::vector<Vector2> rightBikeLane;
+    std::vector<Vector2> leftBikeLane;
+    std::vector<Vector2> rightSidewalk;
+    std::vector<Vector2> leftSidewalk;
 };

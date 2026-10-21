@@ -11,6 +11,19 @@ constexpr float LANE_WAYPOINT_SPACING = 40.0f;
 constexpr float DASH_LENGTH = 60.0f;
 constexpr float DASH_GAP = 60.0f;
 constexpr float DASH_WIDTH = 6.0f;
+constexpr float VEHICLE_LANE_CENTER_OFFSET = 40.0f;
+constexpr float BIKE_LANE_WIDTH = 30.0f;
+constexpr float SIDEWALK_WIDTH = 30.0f;
+constexpr float MARKING_SAMPLE_SPACING = 20.0f;
+constexpr Color BIKE_LANE_COLOR = { 46, 79, 76, 255 };
+constexpr Color BIKE_LANE_MARKING = { 125, 190, 178, 255 };
+constexpr Color SIDEWALK_COLOR = { 174, 170, 157, 255 };
+constexpr Color SIDEWALK_ALT_COLOR = { 164, 161, 150, 255 };
+constexpr Color SIDEWALK_JOINT_COLOR = { 127, 127, 119, 220 };
+constexpr Color CURB_COLOR = { 211, 207, 193, 255 };
+constexpr std::size_t SIDEWALK_SLAB_SEGMENTS = 4;
+constexpr float SIDEWALK_JOINT_WIDTH = 3.0f;
+constexpr float CURB_WIDTH = 5.0f;
 
 Vector2 add(Vector2 first, Vector2 second) {
     return { first.x + second.x, first.y + second.y };
@@ -33,6 +46,68 @@ bool isInsideIntersection(Vector2 point, const std::vector<Intersection>& inters
         }
     );
 }
+
+void drawFrontFacingTriangle(Vector2 first, Vector2 second, Vector2 third, Color color) {
+    const float signedArea =
+        (second.x - first.x) * (third.y - first.y) -
+        (third.x - first.x) * (second.y - first.y);
+    // Raylib's 2D projection flips y and backface culling is enabled, so
+    // world-space clockwise triangles are the visible winding.
+    if (signedArea > 0.0f) {
+        std::swap(second, third);
+    }
+    DrawTriangle(first, second, third, color);
+}
+
+void drawStrip(const std::vector<Vector2>& firstEdge, const std::vector<Vector2>& secondEdge, Color color) {
+    for (std::size_t index = 1; index < firstEdge.size(); ++index) {
+        drawFrontFacingTriangle(firstEdge[index - 1], firstEdge[index], secondEdge[index], color);
+        drawFrontFacingTriangle(firstEdge[index - 1], secondEdge[index], secondEdge[index - 1], color);
+    }
+}
+
+void drawSidewalk(
+    const std::vector<Vector2>& innerEdge,
+    const std::vector<Vector2>& outerEdge,
+    const std::vector<Intersection>& intersections
+) {
+    for (std::size_t index = 1; index < innerEdge.size(); ++index) {
+        const std::size_t slabIndex = (index - 1) / SIDEWALK_SLAB_SEGMENTS;
+        const Color slabColor = slabIndex % 2 == 0 ? SIDEWALK_COLOR : SIDEWALK_ALT_COLOR;
+        drawFrontFacingTriangle(innerEdge[index - 1], innerEdge[index], outerEdge[index], slabColor);
+        drawFrontFacingTriangle(innerEdge[index - 1], outerEdge[index], outerEdge[index - 1], slabColor);
+
+        if (index % SIDEWALK_SLAB_SEGMENTS == 0) {
+            const Vector2 jointCenter = Vector2Scale(Vector2Add(innerEdge[index], outerEdge[index]), 0.5f);
+            if (!isInsideIntersection(jointCenter, intersections)) {
+                DrawLineEx(innerEdge[index], outerEdge[index], SIDEWALK_JOINT_WIDTH, SIDEWALK_JOINT_COLOR);
+            }
+        }
+    }
+}
+
+void drawOffsetMarking(
+    const std::vector<Vector2>& points,
+    const std::vector<Intersection>& intersections,
+    Color color,
+    float thickness
+) {
+    for (std::size_t index = 1; index < points.size(); ++index) {
+        const Vector2 start = points[index - 1];
+        const Vector2 end = points[index];
+        const float length = Vector2Distance(start, end);
+        const int sampleCount = std::max(1, static_cast<int>(std::ceil(length / MARKING_SAMPLE_SPACING)));
+        for (int sample = 0; sample < sampleCount; ++sample) {
+            const float startAmount = static_cast<float>(sample) / static_cast<float>(sampleCount);
+            const float endAmount = static_cast<float>(sample + 1) / static_cast<float>(sampleCount);
+            const Vector2 pieceStart = interpolate(start, end, startAmount);
+            const Vector2 pieceEnd = interpolate(start, end, endAmount);
+            if (!isInsideIntersection(interpolate(pieceStart, pieceEnd, 0.5f), intersections)) {
+                DrawLineEx(pieceStart, pieceEnd, thickness, color);
+            }
+        }
+    }
+}
 }
 
 Road::Road(float centerX, float centerY, float heading, float width, float length)
@@ -41,27 +116,49 @@ Road::Road(float centerX, float centerY, float heading, float width, float lengt
 Road::Road(std::vector<Vector2> points, float roadWidth)
     : centerline(std::move(points)),
       width(roadWidth),
-      rightLane(makeLaneWaypoints(centerline, width / 4.0f, false)),
-      leftLane(makeLaneWaypoints(centerline, -width / 4.0f, true)) {}
+      rightLane(makeLaneWaypoints(centerline, VEHICLE_LANE_CENTER_OFFSET, false)),
+      leftLane(makeLaneWaypoints(centerline, -VEHICLE_LANE_CENTER_OFFSET, true)),
+      rightBikeLane(makeLaneWaypoints(centerline, width * 0.5f - BIKE_LANE_WIDTH * 0.5f, false)),
+      leftBikeLane(makeLaneWaypoints(centerline, -width * 0.5f + BIKE_LANE_WIDTH * 0.5f, true)),
+      rightSidewalk(makeLaneWaypoints(centerline, width * 0.5f + SIDEWALK_WIDTH * 0.5f, false)),
+      leftSidewalk(makeLaneWaypoints(centerline, -width * 0.5f - SIDEWALK_WIDTH * 0.5f, true)) {}
 
 void Road::Draw(const std::vector<Intersection>& intersections) const {
     const std::vector<Vector2> positiveEdge = offsetPolyline(centerline, width * 0.5f);
     const std::vector<Vector2> negativeEdge = offsetPolyline(centerline, -width * 0.5f);
+    drawStrip(positiveEdge, negativeEdge, DARKGRAY);
 
-    for (std::size_t index = 1; index < centerline.size(); ++index) {
-        DrawTriangle(
-            positiveEdge[index - 1],
-            positiveEdge[index],
-            negativeEdge[index],
-            DARKGRAY
-        );
-        DrawTriangle(
-            positiveEdge[index - 1],
-            negativeEdge[index],
-            negativeEdge[index - 1],
-            DARKGRAY
-        );
-    }
+    const float bikeLaneInnerOffset = width * 0.5f - BIKE_LANE_WIDTH;
+    const std::vector<Vector2> rightBikeInnerEdge = offsetPolyline(centerline, bikeLaneInnerOffset);
+    const std::vector<Vector2> leftBikeInnerEdge = offsetPolyline(centerline, -bikeLaneInnerOffset);
+    drawStrip(rightBikeInnerEdge, positiveEdge, BIKE_LANE_COLOR);
+    drawStrip(leftBikeInnerEdge, negativeEdge, BIKE_LANE_COLOR);
+
+    const std::vector<Vector2> rightSidewalkOuterEdge = offsetPolyline(
+        centerline,
+        width * 0.5f + SIDEWALK_WIDTH
+    );
+    const std::vector<Vector2> leftSidewalkOuterEdge = offsetPolyline(
+        centerline,
+        -width * 0.5f - SIDEWALK_WIDTH
+    );
+    drawSidewalk(positiveEdge, rightSidewalkOuterEdge, intersections);
+    drawSidewalk(negativeEdge, leftSidewalkOuterEdge, intersections);
+    drawOffsetMarking(positiveEdge, intersections, CURB_COLOR, CURB_WIDTH);
+    drawOffsetMarking(negativeEdge, intersections, CURB_COLOR, CURB_WIDTH);
+
+    drawOffsetMarking(
+        rightBikeInnerEdge, intersections, WHITE, 4.0f
+    );
+    drawOffsetMarking(
+        leftBikeInnerEdge, intersections, WHITE, 4.0f
+    );
+    drawOffsetMarking(
+        positiveEdge, intersections, BIKE_LANE_MARKING, 4.0f
+    );
+    drawOffsetMarking(
+        negativeEdge, intersections, BIKE_LANE_MARKING, 4.0f
+    );
 
     const float dashPeriod = DASH_LENGTH + DASH_GAP;
     float distanceAlongRoad = 0.0f;
@@ -116,6 +213,11 @@ float Road::getWidth() const {
 const std::vector<Vector2>& Road::getCenterline() const {
     return centerline;
 }
+
+const std::vector<Vector2>& Road::getRightBikeLane() const { return rightBikeLane; }
+const std::vector<Vector2>& Road::getLeftBikeLane() const { return leftBikeLane; }
+const std::vector<Vector2>& Road::getRightSidewalk() const { return rightSidewalk; }
+const std::vector<Vector2>& Road::getLeftSidewalk() const { return leftSidewalk; }
 
 std::vector<Vector2> Road::makeStraightCenterline(
     float centerX,

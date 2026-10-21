@@ -8,11 +8,16 @@
 #include <utility>
 
 namespace {
-constexpr float STOP_LINE_EDGE_OFFSET = 6.0f;
+constexpr float VEHICLE_STOP_BUFFER = 6.0f;
+constexpr float STOP_LINE_HALF_WIDTH = 38.0f;
 constexpr float STOP_SIGN_SHOULDER_OFFSET = 58.0f;
 constexpr float STOP_SIGN_RADIUS = 20.0f;
 constexpr float TRAFFIC_LIGHT_SHOULDER_OFFSET = 82.0f;
 constexpr float TRAFFIC_LIGHT_CYCLE_SECONDS = 22.0f;
+constexpr int CROSSWALK_STRIPE_COUNT = 4;
+constexpr float CROSSWALK_FIRST_STRIPE_OFFSET = 8.0f;
+constexpr float CROSSWALK_STRIPE_SPACING = 12.0f;
+constexpr float CROSSWALK_STRIPE_WIDTH = 5.0f;
 
 void drawSignalLamp(Vector2 center, bool active, Color lit, Color glow, Color unlit) {
     if (active) {
@@ -56,6 +61,52 @@ bool Intersection::containsPoint(Vector2 point) const {
     return inside;
 }
 
+std::vector<std::vector<Vector2>> Intersection::getPedestrianCrossings(float sidewalkExtension) const {
+    std::vector<std::vector<Vector2>> crossings;
+    if (surfacePolygon.size() != 4) {
+        return crossings;
+    }
+
+    Vector2 center = { 0.0f, 0.0f };
+    for (const Vector2 point : surfacePolygon) {
+        center = Vector2Add(center, point);
+    }
+    center = Vector2Scale(center, 0.25f);
+
+    auto normalized = [](Vector2 value) {
+        const float length = Vector2Length(value);
+        return length > 0.0001f ? Vector2Scale(value, 1.0f / length) : Vector2{ 0.0f, 0.0f };
+    };
+
+    for (std::size_t edgeIndex = 0; edgeIndex < 2; ++edgeIndex) {
+        const Vector2 firstEdgeStart = surfacePolygon[edgeIndex];
+        const Vector2 firstEdgeEnd = surfacePolygon[(edgeIndex + 1) % 4];
+        const Vector2 oppositeEdgeStart = surfacePolygon[(edgeIndex + 2) % 4];
+        const Vector2 oppositeEdgeEnd = surfacePolygon[(edgeIndex + 3) % 4];
+        const Vector2 firstMidpoint = Vector2Scale(Vector2Add(firstEdgeStart, firstEdgeEnd), 0.5f);
+        const Vector2 oppositeMidpoint = Vector2Scale(
+            Vector2Add(oppositeEdgeStart, oppositeEdgeEnd),
+            0.5f
+        );
+        const Vector2 firstOutward = normalized(Vector2Subtract(firstMidpoint, center));
+        const Vector2 oppositeOutward = normalized(Vector2Subtract(oppositeMidpoint, center));
+        const Vector2 firstInner = interpolate(firstMidpoint, center, 0.5f);
+        const Vector2 oppositeInner = interpolate(oppositeMidpoint, center, 0.5f);
+
+        crossings.push_back({
+            Vector2Add(firstMidpoint, Vector2Scale(firstOutward, sidewalkExtension)),
+            firstMidpoint,
+            firstInner,
+            center,
+            oppositeInner,
+            oppositeMidpoint,
+            Vector2Add(oppositeMidpoint, Vector2Scale(oppositeOutward, sidewalkExtension))
+        });
+    }
+
+    return crossings;
+}
+
 void Intersection::Draw() const {
     if (surfacePolygon.size() < 3) {
         return;
@@ -88,15 +139,42 @@ void Intersection::Draw() const {
 
     DrawTriangleFan(fanPoints.data(), static_cast<int>(fanPoints.size()), GRAY);
 
+    for (std::size_t edgeIndex = 0; edgeIndex < surfacePolygon.size(); ++edgeIndex) {
+        const Vector2 edgeStart = surfacePolygon[edgeIndex];
+        const Vector2 edgeEnd = surfacePolygon[(edgeIndex + 1) % surfacePolygon.size()];
+        const Vector2 edge = Vector2Subtract(edgeEnd, edgeStart);
+        const float edgeLength = Vector2Length(edge);
+        if (edgeLength <= 0.0001f) {
+            continue;
+        }
+
+        const Vector2 edgeDirection = Vector2Scale(edge, 1.0f / edgeLength);
+        const Vector2 inwardDirection = Vector2Scale(
+            Vector2Subtract(center, Vector2Scale(Vector2Add(edgeStart, edgeEnd), 0.5f)),
+            1.0f / std::max(Vector2Distance(center, Vector2Scale(Vector2Add(edgeStart, edgeEnd), 0.5f)), 0.0001f)
+        );
+        const Vector2 halfCrossing = Vector2Scale(edgeDirection, std::max(0.0f, edgeLength * 0.5f - 6.0f));
+        const Vector2 edgeCenter = Vector2Scale(Vector2Add(edgeStart, edgeEnd), 0.5f);
+        for (int stripe = 0; stripe < CROSSWALK_STRIPE_COUNT; ++stripe) {
+            const Vector2 stripeCenter = Vector2Add(
+                edgeCenter,
+                Vector2Scale(
+                    inwardDirection,
+                    CROSSWALK_FIRST_STRIPE_OFFSET + stripe * CROSSWALK_STRIPE_SPACING
+                )
+            );
+            DrawLineEx(
+                Vector2Subtract(stripeCenter, halfCrossing),
+                Vector2Add(stripeCenter, halfCrossing),
+                CROSSWALK_STRIPE_WIDTH,
+                WHITE
+            );
+        }
+    }
+
     for (const StopApproach& approach : stopApproaches) {
         const Vector2 rightSide = { approach.direction.y, -approach.direction.x };
-        const Vector2 laneHalfWidth = Vector2Scale(rightSide, 38.0f);
-        DrawLineEx(
-            Vector2Subtract(approach.lineCenter, laneHalfWidth),
-            Vector2Add(approach.lineCenter, laneHalfWidth),
-            6.0f,
-            WHITE
-        );
+        DrawLineEx(approach.lineStart, approach.lineEnd, 6.0f, WHITE);
 
         if (stopControlled) {
             const Vector2 signCenter = Vector2Add(
@@ -167,11 +245,14 @@ bool Intersection::isStopControlled() const {
     return stopControlled;
 }
 
-void Intersection::setTrafficLightControlled(bool enabled) {
+void Intersection::setTrafficLightControlled(bool enabled, float phaseOffsetSeconds) {
     trafficLightControlled = enabled;
     if (enabled) {
         stopControlled = false;
-        trafficLightElapsed = 0.0f;
+        trafficLightElapsed = std::fmod(
+            std::max(0.0f, phaseOffsetSeconds),
+            TRAFFIC_LIGHT_CYCLE_SECONDS
+        );
     }
     rebuildStopApproaches();
 }
@@ -247,7 +328,7 @@ std::optional<RouteControlPoint> Intersection::getRouteControlAlongRoute(
             }
 
             const float entryDistance = distanceBeforeSegment + segmentLength * insideAmount;
-            const float vehicleCenterOffset = vehicleLength * 0.5f + STOP_LINE_EDGE_OFFSET;
+            const float vehicleCenterOffset = vehicleLength * 0.5f + VEHICLE_STOP_BUFFER;
             const Vector2 entryPoint = interpolate(start, end, insideAmount);
             Vector2 approachDirection = Vector2Subtract(end, start);
             float nearestApproachDistance = std::numeric_limits<float>::infinity();
@@ -310,8 +391,40 @@ void Intersection::rebuildStopApproaches() {
                     insideAmount
                 );
                 const Vector2 direction = lane->getDirectionAt(index);
+
+                Vector2 lineCenter = entryPoint;
+                Vector2 lineDirection = { direction.y, -direction.x };
+                float closestBoundaryDistanceSquared = std::numeric_limits<float>::infinity();
+                for (std::size_t edgeIndex = 0; edgeIndex < surfacePolygon.size(); ++edgeIndex) {
+                    const Vector2 edgeStart = surfacePolygon[edgeIndex];
+                    const Vector2 edge = Vector2Subtract(
+                        surfacePolygon[(edgeIndex + 1) % surfacePolygon.size()],
+                        edgeStart
+                    );
+                    const float edgeLengthSquared = Vector2LengthSqr(edge);
+                    if (edgeLengthSquared <= 0.0001f) {
+                        continue;
+                    }
+
+                    const float edgeAmount = std::clamp(
+                        Vector2DotProduct(Vector2Subtract(entryPoint, edgeStart), edge) / edgeLengthSquared,
+                        0.0f,
+                        1.0f
+                    );
+                    const Vector2 boundaryPoint = Vector2Add(edgeStart, Vector2Scale(edge, edgeAmount));
+                    const float distanceSquared = Vector2LengthSqr(Vector2Subtract(entryPoint, boundaryPoint));
+                    if (distanceSquared < closestBoundaryDistanceSquared) {
+                        closestBoundaryDistanceSquared = distanceSquared;
+                        lineCenter = boundaryPoint;
+                        lineDirection = Vector2Scale(edge, 1.0f / std::sqrt(edgeLengthSquared));
+                    }
+                }
+
+                const Vector2 lineHalfWidth = Vector2Scale(lineDirection, STOP_LINE_HALF_WIDTH);
                 stopApproaches.push_back({
-                    Vector2Subtract(entryPoint, Vector2Scale(direction, STOP_LINE_EDGE_OFFSET)),
+                    lineCenter,
+                    Vector2Subtract(lineCenter, lineHalfWidth),
+                    Vector2Add(lineCenter, lineHalfWidth),
                     direction
                 });
                 break;

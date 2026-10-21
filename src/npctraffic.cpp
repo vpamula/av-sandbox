@@ -130,10 +130,7 @@ bool NpcTraffic::spawnCar(World& world, const Vehicle& player, Color color) {
         car.route = std::move(route);
         car.vehicle.setSpeed(150.0f);
         car.controller.setRouteControls(world.getRouteControlsAlongRoute(car.route, car.vehicle.getLength()));
-        car.controller.setTrafficLightAspects(
-            world.getTrafficLightAspect(true),
-            world.getTrafficLightAspect(false)
-        );
+        car.controller.setTrafficLightStates(world.getTrafficLightStates());
         car.controller.reacquireWaypoint(car.vehicle, car.route);
         cars.push_back(std::move(car));
         return true;
@@ -177,9 +174,8 @@ float NpcTraffic::speedLimitForTraffic(
     return speedLimit;
 }
 
-void NpcTraffic::update(World& world, const Vehicle& player, float dt) {
-    const TrafficLightAspect horizontalSignal = world.getTrafficLightAspect(true);
-    const TrafficLightAspect verticalSignal = world.getTrafficLightAspect(false);
+void NpcTraffic::prepareForStep(World& world, const Vehicle& player, float dt) {
+    const std::vector<TrafficLightState> trafficLightStates = world.getTrafficLightStates();
 
     for (std::size_t index = 0; index < cars.size(); ++index) {
         Car& car = cars[index];
@@ -200,7 +196,7 @@ void NpcTraffic::update(World& world, const Vehicle& player, float dt) {
             car.controller.reacquireWaypoint(car.vehicle, car.route);
         }
 
-        car.controller.setTrafficLightAspects(horizontalSignal, verticalSignal);
+        car.controller.setTrafficLightStates(trafficLightStates);
         car.controller.update(car.vehicle, car.route, dt);
 
         const float trafficSpeedLimit = speedLimitForTraffic(car, index, player);
@@ -213,8 +209,25 @@ void NpcTraffic::update(World& world, const Vehicle& player, float dt) {
             );
         }
 
-        car.vehicle.Update(dt, false);
     }
+}
+
+std::vector<Vehicle*> NpcTraffic::getVehicles() {
+    std::vector<Vehicle*> vehicles;
+    vehicles.reserve(cars.size());
+    for (Car& car : cars) {
+        vehicles.push_back(&car.vehicle);
+    }
+    return vehicles;
+}
+
+std::vector<StopSignParticipant> NpcTraffic::getStopSignParticipants() {
+    std::vector<StopSignParticipant> participants;
+    participants.reserve(cars.size());
+    for (Car& car : cars) {
+        participants.push_back({ &car.vehicle, &car.controller });
+    }
+    return participants;
 }
 
 void NpcTraffic::Draw() const {

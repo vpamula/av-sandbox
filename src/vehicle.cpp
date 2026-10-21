@@ -25,7 +25,7 @@ void Vehicle::approachSpeed(float targetSpeed, float acceleration, float deceler
     speed = std::max(0.0f, speed);
 }
 
-void Vehicle::Update(float dt, bool manualControl) {
+void Vehicle::Update(float dt, bool manualControl, float maximumSpeed) {
     if (manualControl) {
         if (IsKeyDown(KEY_W)) speed += 200.0f * dt;
         if (IsKeyDown(KEY_S)) speed -= 200.0f * dt;
@@ -46,6 +46,7 @@ void Vehicle::Update(float dt, bool manualControl) {
 
     // Scale friction by elapsed time so motion is stable if the frame rate changes.
     speed *= std::pow(ROLLING_FRICTION_PER_FRAME, dt * 60.0f);
+    speed = std::min(speed, std::max(0.0f, maximumSpeed));
 
     const float speedSquared = speed * speed;
     const float turnRate = speed / (length * (1.0f + 0.00001f * speedSquared));

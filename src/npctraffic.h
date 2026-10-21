@@ -1,6 +1,7 @@
 #pragma once
 
 #include "lanefollower.h"
+#include "stopsigncoordinator.h"
 #include "vehicle.h"
 #include "world.h"
 
@@ -12,7 +13,9 @@ class NpcTraffic {
 public:
     NpcTraffic(World& world, const Vehicle& player, std::size_t carCount);
 
-    void update(World& world, const Vehicle& player, float dt);
+    void prepareForStep(World& world, const Vehicle& player, float dt);
+    std::vector<Vehicle*> getVehicles();
+    std::vector<StopSignParticipant> getStopSignParticipants();
     void Draw() const;
     std::size_t size() const;
 

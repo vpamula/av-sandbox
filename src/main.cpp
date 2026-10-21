@@ -4,6 +4,10 @@
 #include "road.h"
 #include "lanefollower.h"
 #include "npctraffic.h"
+#include "npcroadusers.h"
+#include "perception.h"
+#include "trafficsafety.h"
+#include "stopsigncoordinator.h"
 #include "world.h"
 #include <algorithm>
 #include <cmath>
@@ -32,7 +36,11 @@ int main()
     );
 
     LaneFollower controller;
-    NpcTraffic npcTraffic(world, vehicle, 5);
+    NpcTraffic npcTraffic(world, vehicle, 12);
+    NpcRoadUsers npcRoadUsers(world, vehicle, npcTraffic.getVehicles(), 4, 6);
+    Perception perception;
+    TrafficSafety trafficSafety;
+    StopSignCoordinator stopSignCoordinator;
     Camera2D camera = { 0 };
     camera.offset = (Vector2) {SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2};
     camera.zoom = 0.31f;
@@ -41,7 +49,6 @@ int main()
     bool routeSelected = false;
     bool paused = true;
     bool panningCamera = false;
-    bool followVehicleCamera = true;
     bool leftDragPan = false;
     Vector2 leftDragStart = {0.0f, 0.0f};
     Vector2 startRoutePoint = {0.0f, 0.0f};
@@ -51,14 +58,45 @@ int main()
     bool drivingToSelectedStart = false;
     bool routeCompleted = false;
 
+    auto updatePerception = [&]() {
+        const std::vector<Vehicle*> trafficVehicles = npcTraffic.getVehicles();
+        const std::vector<Vehicle*> roadUserVehicles = npcRoadUsers.getVehicles();
+        std::vector<PerceptionTarget> targets;
+        targets.reserve(trafficVehicles.size() + roadUserVehicles.size());
+        for (std::size_t index = 0; index < trafficVehicles.size(); ++index) {
+            const Vehicle& target = *trafficVehicles[index];
+            targets.push_back({
+                static_cast<int>(index),
+                PerceivedAgentType::Vehicle,
+                { target.getX(), target.getY() },
+                target.getHeading(),
+                target.getSpeed(),
+                target.getLength(),
+                target.getWidth()
+            });
+        }
+        for (std::size_t index = 0; index < roadUserVehicles.size(); ++index) {
+            const Vehicle& target = *roadUserVehicles[index];
+            targets.push_back({
+                static_cast<int>(trafficVehicles.size() + index),
+                index < npcRoadUsers.bicycleCount()
+                    ? PerceivedAgentType::Bicycle
+                    : PerceivedAgentType::Pedestrian,
+                { target.getX(), target.getY() },
+                target.getHeading(),
+                target.getSpeed(),
+                target.getLength(),
+                target.getWidth()
+            });
+        }
+        perception.update(vehicle, targets, world);
+    };
+
     while (!WindowShouldClose()) {
         float dt = GetFrameTime();
 
         if (IsKeyPressed(KEY_SPACE)) {
             paused = !paused;
-            if (!paused) {
-                followVehicleCamera = true;
-            }
         }
 
         if (IsKeyPressed(KEY_TAB)) {
@@ -84,7 +122,6 @@ int main()
 
         if (IsMouseButtonPressed(MOUSE_RIGHT_BUTTON) || IsMouseButtonPressed(MOUSE_MIDDLE_BUTTON)) {
             panningCamera = true;
-            followVehicleCamera = false;
         }
 
         if (IsMouseButtonReleased(MOUSE_RIGHT_BUTTON) || IsMouseButtonReleased(MOUSE_MIDDLE_BUTTON)) {
@@ -102,7 +139,6 @@ int main()
             float dragDistance = std::hypot(dragDelta.x, dragDelta.y);
             if (dragDistance > 8.0f) {
                 panningCamera = true;
-                followVehicleCamera = false;
             }
             else {
                 panningCamera = false;
@@ -190,7 +226,6 @@ int main()
             Vector2 worldBeforeZoom = GetScreenToWorld2D(mouseScreen, camera);
             float newZoom = std::clamp(camera.zoom * zoomFactor, 0.3f, 3.0f);
             camera.zoom = newZoom;
-            followVehicleCamera = false;
 
             Vector2 cursorOffset = Vector2Subtract(mouseScreen, camera.offset);
             Vector2 scaledOffset = Vector2Scale(cursorOffset, 1.0f / camera.zoom);
@@ -209,12 +244,17 @@ int main()
             zoomAroundCursor(1.0f / 1.15f);
         }
 
+        // The simulated sensor observes the current scene before the ego
+        // controller chooses its speed for this frame.
+        updatePerception();
+
         if (!paused) {
             world.updateTrafficLights(dt);
-            controller.setTrafficLightAspects(
-                world.getTrafficLightAspect(true),
-                world.getTrafficLightAspect(false)
-            );
+            controller.setTrafficLightStates(world.getTrafficLightStates());
+
+            std::vector<StopSignParticipant> stopSignParticipants = npcTraffic.getStopSignParticipants();
+            stopSignParticipants.push_back({ &vehicle, &controller });
+            stopSignCoordinator.update(world, stopSignParticipants);
 
             if (routeCompleted) {
                 vehicle.setSpeed(0.0f);
@@ -254,20 +294,30 @@ int main()
                 }
             }
 
-            if (!routeCompleted) {
-                vehicle.Update(dt, !autonomousMode);
+            if (autonomousMode && !routeCompleted) {
+                const float perceptionSpeedLimit = perception.getRecommendedEgoSpeed(vehicle);
+                if (perceptionSpeedLimit < vehicle.getSpeed()) {
+                    vehicle.approachSpeed(perceptionSpeedLimit, 180.0f, 700.0f, dt);
+                }
             }
-            npcTraffic.update(world, vehicle, dt);
+
+            npcTraffic.prepareForStep(world, vehicle, dt);
+            npcRoadUsers.prepareForStep(dt);
+            std::vector<Vehicle*> vehicles = { &vehicle };
+            std::vector<Vehicle*> npcVehicles = npcTraffic.getVehicles();
+            vehicles.insert(vehicles.end(), npcVehicles.begin(), npcVehicles.end());
+            const std::size_t roadUserPriorityStart = vehicles.size();
+            std::vector<Vehicle*> roadUserVehicles = npcRoadUsers.getVehicles();
+            vehicles.insert(vehicles.end(), roadUserVehicles.begin(), roadUserVehicles.end());
+            trafficSafety.step(
+                vehicles,
+                !autonomousMode && !routeCompleted,
+                dt,
+                roadUserPriorityStart
+            );
         }
         else {
             vehicle.setSpeed(0.0f);
-        }
-
-        if (!paused && !panningCamera && followVehicleCamera) {
-            camera.target = (Vector2) {
-                vehicle.getX(),
-                vehicle.getY()
-            };
         }
 
         BeginDrawing();
@@ -293,6 +343,8 @@ int main()
         }
 
         npcTraffic.Draw();
+        npcRoadUsers.Draw();
+        perception.Draw(vehicle);
         vehicle.Draw();
         EndMode2D();
 
@@ -322,9 +374,27 @@ int main()
                     ? ORANGE
                     : GREEN));
         DrawText(motionStatus, 20, 180, 30, motionStatusColor);
-        DrawText(TextFormat("NPC TRAFFIC: %i CARS", static_cast<int>(npcTraffic.size())), 20, 220, 18, WHITE);
+        DrawText(
+            TextFormat(
+                "NPCs: %i CARS / %i BIKES / %i PEDS",
+                static_cast<int>(npcTraffic.size()),
+                static_cast<int>(npcRoadUsers.bicycleCount()),
+                static_cast<int>(npcRoadUsers.pedestrianCount())
+            ),
+            20,
+            220,
+            18,
+            WHITE
+        );
         DrawText("BLUE: current position to start click", 20, 245, 18, SKYBLUE);
         DrawText("YELLOW: start click to destination click", 20, 270, 18, YELLOW);
+        DrawText(
+            TextFormat("PERCEPTION: %i OBJECTS", static_cast<int>(perception.getObjects().size())),
+            20,
+            295,
+            18,
+            LIME
+        );
 
         const int bottomLeftX = 20;
         const int bottomLeftY = SCREEN_HEIGHT - 150;

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <limits>
 #include <random>
 #include <utility>
@@ -11,6 +12,8 @@
 namespace {
 constexpr float INTERSECTION_DRAW_SIZE = 220.0f;
 constexpr float INTERSECTION_DEDUPE_DISTANCE = 30.0f;
+constexpr float SIDEWALK_VISIBILITY_MARGIN = 35.0f;
+constexpr float LINE_OF_SIGHT_SAMPLE_SPACING = 20.0f;
 
 float cross(Vector2 first, Vector2 second) {
     return first.x * second.y - first.y * second.x;
@@ -43,6 +46,31 @@ Vector2 directionAt(const Road& road, Vector2 point) {
     }
 
     return closestDirection;
+}
+
+bool pointIsNearRoadCorridor(Vector2 point, const Road& road) {
+    const float corridorHalfWidth = road.getWidth() * 0.5f + SIDEWALK_VISIBILITY_MARGIN;
+    const float corridorDistanceSquared = corridorHalfWidth * corridorHalfWidth;
+    const std::vector<Vector2>& centerline = road.getCenterline();
+
+    for (std::size_t index = 1; index < centerline.size(); ++index) {
+        const Vector2 start = centerline[index - 1];
+        const Vector2 segment = Vector2Subtract(centerline[index], start);
+        const float segmentLengthSquared = Vector2LengthSqr(segment);
+        const float projection = segmentLengthSquared <= 0.0001f
+            ? 0.0f
+            : std::clamp(
+                Vector2DotProduct(Vector2Subtract(point, start), segment) / segmentLengthSquared,
+                0.0f,
+                1.0f
+            );
+        const Vector2 closestPoint = Vector2Add(start, Vector2Scale(segment, projection));
+        if (Vector2LengthSqr(Vector2Subtract(point, closestPoint)) <= corridorDistanceSquared) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 std::optional<Vector2> intersectSegments(Vector2 startA, Vector2 endA, Vector2 startB, Vector2 endB) {
@@ -207,7 +235,7 @@ std::vector<Vector2> findCenterlineIntersections(const Road& first, const Road& 
 World World::makeDowntownGrid() {
     constexpr int BLOCKS_PER_SIDE = 5;
     constexpr float BLOCK_SPACING = 500.0f;
-    constexpr float ROAD_WIDTH = 160.0f;
+    constexpr float ROAD_WIDTH = 220.0f;
     constexpr float ROAD_SAMPLE_SPACING = 20.0f;
     constexpr float CURVE_AMPLITUDE = 75.0f;
 
@@ -280,6 +308,28 @@ bool World::isPointInIntersection(Vector2 worldPoint) const {
     );
 }
 
+bool World::hasRoadCorridorLineOfSight(Vector2 from, Vector2 to) const {
+    const float distance = Vector2Distance(from, to);
+    const int sampleCount = std::max(
+        1,
+        static_cast<int>(std::ceil(distance / LINE_OF_SIGHT_SAMPLE_SPACING))
+    );
+
+    for (int sample = 0; sample <= sampleCount; ++sample) {
+        const float amount = static_cast<float>(sample) / static_cast<float>(sampleCount);
+        const Vector2 point = Vector2Add(from, Vector2Scale(Vector2Subtract(to, from), amount));
+        const bool visibleSurface = isPointInIntersection(point) ||
+            std::any_of(roads.begin(), roads.end(), [&](const Road& road) {
+                return pointIsNearRoadCorridor(point, road);
+            });
+        if (!visibleSurface) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 std::vector<Vector2> World::buildRouteBetweenPoints(Vector2 start, Vector2 end) const {
     const auto snappedStart = graph.snapPointToRoad(start, 200.0f);
     const auto snappedEnd = graph.snapPointToRoad(end, 200.0f);
@@ -290,15 +340,39 @@ std::vector<Vector2> World::buildRouteBetweenPoints(Vector2 start, Vector2 end) 
     return graph.findRoute(start, end);
 }
 
+std::vector<std::vector<Vector2>> World::getPedestrianCrossings() const {
+    constexpr float SIDEWALK_EXTENSION = 36.0f;
+    std::vector<std::vector<Vector2>> crossings;
+    for (const Intersection& intersection : intersections) {
+        std::vector<std::vector<Vector2>> junctionCrossings =
+            intersection.getPedestrianCrossings(SIDEWALK_EXTENSION);
+        crossings.insert(
+            crossings.end(),
+            std::make_move_iterator(junctionCrossings.begin()),
+            std::make_move_iterator(junctionCrossings.end())
+        );
+    }
+    return crossings;
+}
+
+std::optional<Rectangle> World::getIntersectionBounds(std::size_t intersectionIndex) const {
+    if (intersectionIndex >= intersections.size()) {
+        return std::nullopt;
+    }
+    return intersections[intersectionIndex].getBounds();
+}
+
 std::vector<RouteControlPoint> World::getRouteControlsAlongRoute(
     const std::vector<Vector2>& route,
     float vehicleLength
 ) const {
     std::vector<RouteControlPoint> controls;
-    for (const Intersection& intersection : intersections) {
-        const auto control = intersection.getRouteControlAlongRoute(route, vehicleLength);
+    for (std::size_t index = 0; index < intersections.size(); ++index) {
+        const auto control = intersections[index].getRouteControlAlongRoute(route, vehicleLength);
         if (control) {
-            controls.push_back(*control);
+            RouteControlPoint indexedControl = *control;
+            indexedControl.intersectionIndex = index;
+            controls.push_back(indexedControl);
         }
     }
 
@@ -308,13 +382,16 @@ std::vector<RouteControlPoint> World::getRouteControlsAlongRoute(
     return controls;
 }
 
-TrafficLightAspect World::getTrafficLightAspect(bool horizontalAxis) const {
+std::vector<TrafficLightState> World::getTrafficLightStates() const {
+    std::vector<TrafficLightState> states;
+    states.reserve(intersections.size());
     for (const Intersection& intersection : intersections) {
-        if (intersection.isTrafficLightControlled()) {
-            return intersection.getTrafficLightAspect(horizontalAxis);
-        }
+        states.push_back({
+            intersection.getTrafficLightAspect(true),
+            intersection.getTrafficLightAspect(false)
+        });
     }
-    return TrafficLightAspect::Green;
+    return states;
 }
 
 void World::updateTrafficLights(float dt) {
@@ -389,6 +466,7 @@ void World::computeIntersections() {
         std::mt19937 random(seedSource());
         constexpr std::size_t ADDITIONAL_TRAFFIC_LIGHTS = 3;
         constexpr std::size_t ADDITIONAL_STOP_SIGNS = 2;
+        std::uniform_real_distribution<float> chooseSignalPhase(0.0f, 22.0f);
 
         auto centerOf = [&](std::size_t index) {
             const Rectangle bounds = intersections[index].getBounds();
@@ -498,7 +576,10 @@ void World::computeIntersections() {
         const std::size_t trafficLightCount = std::min(ADDITIONAL_TRAFFIC_LIGHTS, selectedIndices.size());
         for (std::size_t index = 0; index < selectedIndices.size(); ++index) {
             if (index < trafficLightCount) {
-                intersections[selectedIndices[index]].setTrafficLightControlled(true);
+                intersections[selectedIndices[index]].setTrafficLightControlled(
+                    true,
+                    chooseSignalPhase(random)
+                );
             }
             else {
                 intersections[selectedIndices[index]].setStopControlled(true);
