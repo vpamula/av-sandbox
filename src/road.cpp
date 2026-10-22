@@ -397,6 +397,10 @@ std::vector<Lane>& Road::getRightLanes() { return rightLanes; }
 const std::vector<Lane>& Road::getRightLanes() const { return rightLanes; }
 std::vector<Lane>& Road::getLeftLanes() { return leftLanes; }
 const std::vector<Lane>& Road::getLeftLanes() const { return leftLanes; }
+bool Road::isRightmostLane(const Lane* lane) const {
+    return (!rightLanes.empty() && lane == &rightLanes.front()) ||
+        (!leftLanes.empty() && lane == &leftLanes.front());
+}
 
 float Road::getWidth() const {
     return width;

@@ -1,6 +1,7 @@
 #include "intersection.h"
 
 #include "raymath.h"
+#include "road.h"
 
 #include <algorithm>
 #include <cmath>
@@ -651,8 +652,18 @@ bool Intersection::isValidTransition(const Lane* incomingLane, const Lane* outgo
     const Vector2 incomingDirection = directionAtIntersection(incomingLane);
     const Vector2 outgoingDirection = directionAtIntersection(outgoingLane);
     const float directionDot = Vector2DotProduct(incomingDirection, outgoingDirection);
+    const float turnCross = incomingDirection.x * outgoingDirection.y -
+        incomingDirection.y * outgoingDirection.x;
+
+    // Screen-space coordinates have positive y downward, so a positive cross
+    // product represents a clockwise (right) turn.
+    if (turnCross > 0.35f && incomingRoad != laneRoads.end() &&
+        incomingRoad->second && !incomingRoad->second->isRightmostLane(incomingLane)) {
+        return false;
+    }
 
     // Allow straight, left, and right movements; reject only a near-180-degree
-    // U-turn. Lane changes between lanes on the same road happen mid-block.
+    // U-turn. Right turns are restricted to the approach's rightmost lane;
+    // lane changes between lanes on the same road happen mid-block.
     return directionDot > -0.8f;
 }
