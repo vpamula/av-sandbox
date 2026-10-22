@@ -14,14 +14,15 @@
 
 namespace {
 constexpr float TRANSITION_SEARCH_RADIUS = 220.0f;
-constexpr float LANE_CHANGE_SPACING = 500.0f;
-constexpr float LANE_CHANGE_LENGTH = 160.0f;
+constexpr float LANE_CHANGE_SPACING = 200.0f;
+constexpr float LANE_CHANGE_LENGTH = 120.0f;
 constexpr int LANE_CHANGE_SAMPLES = 18;
 constexpr float BIKE_LANE_CLEARANCE = 36.0f;
-constexpr float BIKE_LANE_OVERLAP_WEIGHT = 6.0f;
+constexpr float BIKE_LANE_OVERLAP_WEIGHT = 0.6f;
 constexpr float CROSSWALK_CLEARANCE = 48.0f;
-constexpr float CROSSWALK_OVERLAP_WEIGHT = 8.0f;
+constexpr float CROSSWALK_OVERLAP_WEIGHT = 0.8f;
 constexpr float TURN_HANDLE_RATIO = 0.58f;
+constexpr float MAX_ROUTING_PENALTY_RATIO = 0.35f;
 
 Vector2 normalizeOrZero(Vector2 value) {
     const float lengthSquared = value.x * value.x + value.y * value.y;
@@ -598,7 +599,11 @@ std::vector<Vector2> RoadGraph::findRoute(Vector2 start, Vector2 end) const {
             }
 
             const std::size_t nextNode = static_cast<std::size_t>(edge.endNode);
-            const float nextCost = currentCost + edgeLength + edge.routingPenalty;
+            const float routingPenalty = std::min(
+                edge.routingPenalty,
+                edgeLength * MAX_ROUTING_PENALTY_RATIO
+            );
+            const float nextCost = currentCost + edgeLength + routingPenalty;
             if (nextCost < cost[nextNode]) {
                 cost[nextNode] = nextCost;
                 previous[nextNode] = currentNode;
