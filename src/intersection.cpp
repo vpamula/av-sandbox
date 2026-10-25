@@ -662,8 +662,13 @@ bool Intersection::isValidTransition(const Lane* incomingLane, const Lane* outgo
         return false;
     }
 
+    if (turnCross < -0.35f && incomingRoad != laneRoads.end() &&
+        incomingRoad->second && !incomingRoad->second->isLeftmostLane(incomingLane)) {
+        return false;
+    }
+
     // Allow straight, left, and right movements; reject only a near-180-degree
-    // U-turn. Right turns are restricted to the approach's rightmost lane;
-    // lane changes between lanes on the same road happen mid-block.
+    // U-turn. Right turns require the approach's rightmost lane and left turns
+    // require its leftmost lane; lane changes happen mid-block.
     return directionDot > -0.8f;
 }

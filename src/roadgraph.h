@@ -20,7 +20,7 @@ struct RoadGraphEdge {
     int startNode = -1;
     int endNode = -1;
     std::vector<Vector2> points;
-    float routingPenalty = 0.0f;
+    float cost = 0.0f;
 };
 
 class RoadGraph {
@@ -31,6 +31,7 @@ public:
         const Lane* outgoingLane,
         const Intersection& intersection
     );
+
     std::optional<Vector2> snapPointToRoad(Vector2 worldPoint, float maxDistance = 150.0f) const;
     std::vector<Vector2> findRoute(Vector2 start, Vector2 end) const;
 
@@ -39,30 +40,25 @@ private:
         int nodeIndex;
         std::size_t waypointIndex;
     };
-    struct NearbyNode {
-        int nodeIndex;
-        float distance;
-    };
 
-    std::optional<BoundaryNode> findLaneBoundaryNode(
-        const std::vector<int>& candidates,
+    std::vector<BoundaryNode> findLaneBoundaryNodes(
+        const std::vector<int>& laneNodes,
         const Lane& lane,
-        Vector2 junctionCenter,
-        Rectangle junctionBounds,
-        bool incomingBoundary
+        Vector2 intersectionCenter,
+        Rectangle intersectionBounds,
+        bool incoming
     ) const;
-    std::vector<NearbyNode> findNearbyNodes(Vector2 worldPoint, float maxDistance, float tieTolerance) const;
-    std::optional<int> findNearestNode(Vector2 worldPoint, float maxDistance) const;
+    std::optional<int> findNearestNode(Vector2 point, float maxDistance) const;
+    void addEdge(int startNode, int endNode, std::vector<Vector2> points, float extraCost = 0.0f);
 
     static std::vector<Vector2> buildTransitionSpline(
-        Vector2 entryPoint,
-        Vector2 exitPoint,
+        Vector2 entry,
+        Vector2 exit,
         Vector2 incomingDirection,
         Vector2 outgoingDirection,
         int samples = 18,
         float handleRatio = 0.5f
     );
-    static float distanceToRectangle(Vector2 point, Rectangle rect);
 
     std::vector<RoadGraphNode> nodes;
     std::vector<RoadGraphEdge> edges;

@@ -503,12 +503,6 @@ bool World::isPointOnRoadSurface(Vector2 worldPoint, float margin) const {
 }
 
 std::vector<Vector2> World::buildRouteBetweenPoints(Vector2 start, Vector2 end) const {
-    const auto snappedStart = graph.snapPointToRoad(start, 200.0f);
-    const auto snappedEnd = graph.snapPointToRoad(end, 200.0f);
-    if (!snappedStart || !snappedEnd) {
-        return {};
-    }
-
     return graph.findRoute(start, end);
 }
 

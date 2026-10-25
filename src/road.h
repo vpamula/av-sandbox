@@ -34,6 +34,7 @@ public:
     std::vector<Lane>& getLeftLanes();
     const std::vector<Lane>& getLeftLanes() const;
     bool isRightmostLane(const Lane* lane) const;
+    bool isLeftmostLane(const Lane* lane) const;
     float getWidth() const;
     Rectangle getPavedBounds() const;
     const std::vector<Vector2>& getCenterline() const;

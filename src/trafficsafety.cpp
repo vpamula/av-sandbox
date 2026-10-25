@@ -14,7 +14,8 @@ constexpr float PREDICTION_HORIZON_SECONDS = 3.5f;
 constexpr float PREDICTION_STEP_SECONDS = 0.02f;
 constexpr float MAX_SAFETY_DECELERATION = 700.0f;
 constexpr float COLLISION_CLEARANCE = 3.0f;
-constexpr float JUNCTION_APPROACH_MARGIN = 120.0f;
+constexpr float JUNCTION_APPROACH_MARGIN = 40.0f;
+constexpr std::size_t RESERVATION_REORDER_MARGIN_STEPS = 2;
 constexpr float ANGLE_PI = 3.14159265358979323846f;
 
 enum class MotionMode {
@@ -347,6 +348,28 @@ void TrafficSafety::step(
                     reservation.owner = nullptr;
                     reservation.ownerEntered = false;
                 }
+                else if (!reservation.ownerEntered) {
+                    // Before a vehicle enters, refresh its priority from the
+                    // current predicted arrival times. A reservation claimed
+                    // earlier must not make an earlier-arriving car stop.
+                    std::size_t earliestIndex = index;
+                    std::size_t earliestArrival = requestedArrivalSteps[index];
+                    const std::size_t carCount = std::min(priorityParticipantStart, vehicles.size());
+                    for (std::size_t candidate = 0; candidate < carCount; ++candidate) {
+                        if (requestedJunctions[candidate] != intersection ||
+                            requestedArrivalSteps[candidate] >= earliestArrival) {
+                            continue;
+                        }
+                        earliestArrival = requestedArrivalSteps[candidate];
+                        earliestIndex = candidate;
+                    }
+
+                    if (earliestIndex != index &&
+                        earliestArrival + RESERVATION_REORDER_MARGIN_STEPS < requestedArrivalSteps[index]) {
+                        reservation.owner = vehicles[earliestIndex];
+                        reservation.ownerEntered = false;
+                    }
+                }
             }
         }
 
@@ -357,8 +380,25 @@ void TrafficSafety::step(
                 return true;
             }
             const std::size_t index = static_cast<std::size_t>(vehicle - vehicles.begin());
-            return index >= requestedJunctions.size() || requestedJunctions[index] != intersection;
+            return index >= requestedJunctions.size() ||
+                requestedJunctions[index] != intersection ||
+                request.vehicle == reservation.owner;
         }), reservation.waiting.end());
+
+        for (JunctionRequest& request : reservation.waiting) {
+            const auto vehicle = std::find(vehicles.begin(), vehicles.end(), request.vehicle);
+            if (vehicle != vehicles.end()) {
+                const std::size_t index = static_cast<std::size_t>(vehicle - vehicles.begin());
+                request.arrivalStep = requestedArrivalSteps[index];
+            }
+        }
+        std::stable_sort(
+            reservation.waiting.begin(),
+            reservation.waiting.end(),
+            [](const JunctionRequest& first, const JunctionRequest& second) {
+                return first.arrivalStep < second.arrivalStep;
+            }
+        );
 
         if (!reservation.owner && reservation.waiting.empty()) {
             iterator = uncontrolledJunctions.erase(iterator);

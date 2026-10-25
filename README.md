@@ -33,11 +33,11 @@ Traffic controls are placed at a subset of intersections: five traffic lights an
 
 ## Routing and road users
 
-- A click snaps to a nearby lane waypoint. The vehicle route is planned over a directed lane graph, rather than over an undirected road-centerline map.
-- Lane-following edges connect successive waypoints. Legal intersection movements are explicit curved connector edges between incoming and outgoing lanes. Selected multilane streets also have mid-block lane-change connectors. Right turns are allowed only from the rightmost lane.
-- Dijkstra's algorithm searches this graph using distance plus a routing penalty. The penalty discourages paths that overlap bike lanes and crosswalks, while keeping distance as the main cost. These are soft preferences: a crosswalk is not a forbidden area in the vehicle graph.
+- Each click snaps to the nearest lane waypoint. Multi-click routes are solved segment by segment from the previous segment's snapped endpoint, so adjacent segments stay connected.
+- The directed lane graph uses waypoints as nodes and forward travel as edges. Curved connector edges represent legal intersection turns. Connectors can start or end at either of the nearest usable lane waypoints beside an intersection, which supports clicks just outside an intersection. U-turns are rejected; left turns require the leftmost approach lane and right turns require the rightmost. On multilane roads, lane changes connect adjacent lanes between intersections.
+- Dijkstra minimizes traveled distance plus a small capped cost for junction paths that overlap bike lanes or crosswalks. That cost can break close ties without sending a vehicle on a long detour; a crosswalk remains traversable when required by the turn.
 - Sidewalks and crosswalks are not vehicle-graph edges. Pedestrian NPCs follow separate sidewalk and crosswalk paths; cyclists follow bike-lane paths.
-- NPC cars choose routes through the same lane graph. A separate traffic-safety layer predicts short-horizon motion and applies braking or yielding when it detects potential conflicts. It uses simplified vehicle shapes and simulator state, so it should not be interpreted as a guaranteed collision-prevention system.
+- NPC cars choose routes through the same lane graph. A separate traffic-safety layer predicts short-horizon motion and applies braking or yielding for potential conflicts with vehicles, cyclists, and pedestrians. At uncontrolled junctions, cars reserve entry according to predicted arrival time; the reservation can be reassigned before entry as arrival estimates change and is held until the owner clears the junction. The model uses simplified vehicle shapes and simulator state, so it is not a validated collision-prevention system.
 - The perception component filters simulated actors by range, field of view, and road-corridor visibility, then adds position noise. The ego vehicle uses those observations for a basic following-speed limit; this is not camera or lidar perception.
 
 ## Code map

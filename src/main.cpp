@@ -57,20 +57,24 @@ int main()
     bool drivingToSelectedStart = false;
     bool routeCompleted = false;
 
-    auto buildRouteThroughPoints = [&world](const std::vector<Vector2>& points) {
+    auto buildRouteThroughPoints = [&world](std::vector<Vector2>& points) {
         std::vector<Vector2> route;
         if (points.size() < 2) {
             return route;
         }
 
         for (std::size_t index = 1; index < points.size(); ++index) {
+            const Vector2 segmentStart = route.empty() ? points[index - 1] : route.back();
             std::vector<Vector2> segment = world.buildRouteBetweenPoints(
-                points[index - 1],
+                segmentStart,
                 points[index]
             );
             if (segment.empty()) {
                 return std::vector<Vector2>{};
             }
+
+            points[index - 1] = segment.front();
+            points[index] = segment.back();
 
             std::size_t firstPoint = 0;
             if (!route.empty() && Vector2Distance(route.back(), segment.front()) <= 1.0f) {

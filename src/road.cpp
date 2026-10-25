@@ -401,6 +401,10 @@ bool Road::isRightmostLane(const Lane* lane) const {
     return (!rightLanes.empty() && lane == &rightLanes.front()) ||
         (!leftLanes.empty() && lane == &leftLanes.front());
 }
+bool Road::isLeftmostLane(const Lane* lane) const {
+    return (!rightLanes.empty() && lane == &rightLanes.back()) ||
+        (!leftLanes.empty() && lane == &leftLanes.back());
+}
 
 float Road::getWidth() const {
     return width;
